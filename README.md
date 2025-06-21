@@ -162,6 +162,161 @@ The fuzzy search server also works as a standalone CLI tool:
 ./mcp_fuzzy_search.py search-content "handle" src --pattern "error|exception" --rg-flags "-i"
 ```
 
+## fzf Search Syntax Guide
+
+Both MCP servers use **fzf's extended search syntax** for powerful fuzzy filtering. Understanding this syntax will help you construct precise queries.
+
+### Basic Syntax
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| `term` | Fuzzy match (default) | `config` matches "configuration" |
+| `term1 term2` | AND logic (all terms must match) | `main config` requires both terms |
+| `term1 \| term2` | OR logic (any term can match) | `py$ \| js$ \| go$` matches files ending in any |
+
+### Exact Matching
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| `'term` | Partial exact match | `'main` exactly matches "main" substring |
+| `'term'` | Exact boundary match | `'main.py'` matches exactly at word boundaries |
+
+### Position Anchors
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| `^term` | Prefix match (starts with) | `^src` matches "src/file.py" |
+| `term$` | Suffix match (ends with) | `.json$` matches "config.json" |
+| `^term$` | Exact match (entire string) | `^README$` matches only "README" |
+
+### Negation (Exclusion)
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| `!term` | Exclude fuzzy matches | `config !test` excludes test files |
+| `!'term` | Exclude exact matches | `!'backup'` excludes files with exact "backup" |
+| `!^term` | Exclude prefix matches | `!^.` excludes hidden files |
+| `!term$` | Exclude suffix matches | `!.tmp$` excludes temporary files |
+
+### Advanced Examples
+
+```bash
+# Find Python configuration files, excluding tests
+config .py$ !test
+
+# Find main files in src directory with multiple extensions  
+^src/ main py$ | js$ | go$
+
+# Find exact package manager files
+'package.json' | 'yarn.lock' | 'Pipfile'
+
+# Find TODO comments in code files, excluding documentation
+TODO .py$ | .js$ | .go$ !README !docs/
+
+# Find function definitions, excluding test files
+'def ' .py$ !test !spec
+
+# Find configuration files with specific extensions, excluding backups
+config .json$ | .yaml$ | .toml$ !.bak$ !.old$
+```
+
+### Content Search Specific Patterns
+
+When using `fuzzy_search_content`, queries work on the format `file:line:content`:
+
+```bash
+# Find implementation TODOs in specific file types
+TODO implement .py: | .js:
+
+# Find error handling in specific files
+error 'main.py:' | 'app.js:'
+
+# Find async functions with error handling
+'async def' error .py$
+
+# Find class definitions excluding test files
+'class ' .py: !test !spec
+
+# Find imports from specific modules
+'import' react | lodash | numpy
+```
+
+## ripgrep (rg) Flags Reference
+
+The `fuzzy_search_content` tool accepts `rg_flags` for enhanced searching. Here are the most useful flags:
+
+### Case Sensitivity
+| Flag | Description | Example |
+|------|-------------|---------|
+| `-i, --ignore-case` | Case insensitive search | `rg -i "todo"` matches TODO, Todo, todo |
+| `-S, --smart-case` | Case insensitive if lowercase, sensitive if mixed | `rg -S "Todo"` is case sensitive |
+| `-s, --case-sensitive` | Force case sensitive (default) | `rg -s "TODO"` matches only TODO |
+
+### File Type Filtering
+| Flag | Description | Example |
+|------|-------------|---------|
+| `-t TYPE` | Only search specific file types | `rg -t py "class"` searches Python files only |
+| `-T TYPE` | Exclude specific file types | `rg -T test "function"` excludes test files |
+| `--type-list` | Show all supported file types | `rg --type-list` |
+
+### Context Lines
+| Flag | Description | Example |
+|------|-------------|---------|
+| `-A NUM` | Show NUM lines after match | `rg -A 3 "TODO"` shows 3 lines after |
+| `-B NUM` | Show NUM lines before match | `rg -B 2 "class"` shows 2 lines before |
+| `-C NUM` | Show NUM lines before and after | `rg -C 3 "function"` shows 3 lines both sides |
+
+### File Handling
+| Flag | Description | Example |
+|------|-------------|---------|
+| `-.` | Search hidden files/directories | `rg -. "config"` includes .hidden files |
+| `--no-ignore` | Ignore .gitignore rules | `rg --no-ignore "debug"` searches ignored files |
+| `-u` | Reduce filtering (1-3 times) | `rg -uu "pattern"` = `--no-ignore --hidden` |
+
+### Pattern Matching
+| Flag | Description | Example |
+|------|-------------|---------|
+| `-F` | Literal string search (no regex) | `rg -F "func()"` searches for exact text |
+| `-w` | Match whole words only | `rg -w "test"` won't match "testing" |
+| `-v` | Invert match (show non-matches) | `rg -v "TODO"` shows lines without TODO |
+| `-x` | Match entire lines only | `rg -x "import os"` matches exact line |
+
+### Advanced Features
+| Flag | Description | Example |
+|------|-------------|---------|
+| `-U` | Enable multiline matching | `rg -U "class.*{.*}"` spans multiple lines |
+| `-P` | Use PCRE2 regex engine | `rg -P "(?<=def )\\w+"` uses lookbehind |
+| `-o` | Show only matching parts | `rg -o "\\w+@\\w+\\.com"` shows just emails |
+
+### Output Control
+| Flag | Description | Example |
+|------|-------------|---------|
+| `-c` | Count matches per file | `rg -c "TODO"` shows count only |
+| `-l` | Show only filenames with matches | `rg -l "class"` lists files containing class |
+| `--column` | Show column numbers | `rg --column "function"` includes column info |
+
+### Practical Combinations
+
+```bash
+# Case-insensitive search with context in Python files
+rg_flags: "-i -C 3 -t py"
+
+# Search all files including hidden and ignored, with context
+rg_flags: "-uu -C 2"
+
+# Find exact function signatures in code files
+rg_flags: "-F -w -t py -t js -t go"
+
+# Search for TODOs with file types, case insensitive, show context
+rg_flags: "-i -C 1 -t py -t js --no-ignore"
+
+# Multi-line class definitions with context
+rg_flags: "-U -C 3 -t py"
+
+# Literal string search in all text files
+rg_flags: "-F --no-ignore -t txt -t md -t rst"
+```
+
 ## MCP Tools Documentation
 
 ### File Search Server Tools

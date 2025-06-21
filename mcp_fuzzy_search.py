@@ -89,10 +89,30 @@ mcp = FastMCP("fuzzy-search")
     description=(
         "Search for file paths using fuzzy matching.\n\n"
         "Args:\n"
-        "  filter (str): Fuzzy search string. Required.\n"
+        "  filter (str): fzf query string with advanced syntax support. Required.\n"
         "  path   (str, optional): Directory to search. Defaults to current dir.\n"
         "  hidden (bool, optional): Include hidden files. Default false.\n"
         "  limit  (int, optional): Max results to return. Default 20.\n\n"
+        "fzf Query Syntax (Extended Search Mode):\n"
+        "  Basic Terms: Space-separated terms use AND logic (all must match)\n"
+        "    'main config' → files containing both 'main' AND 'config'\n"
+        "  OR Logic: Use | to match any term\n"
+        "    'py$ | js$ | go$' → files ending in .py OR .js OR .go\n"
+        "  Exact Match: Wrap in single quotes for exact string matching\n"
+        "    ''main.py'' → exact match for 'main.py'\n"
+        "    'test → partial exact match for 'test'\n"
+        "  Position Anchors:\n"
+        "    '^src' → files starting with 'src'\n"
+        "    '.json$' → files ending with '.json'\n"
+        "    '^README$' → files exactly named 'README'\n"
+        "  Negation: Use ! to exclude matches\n"
+        "    '!test' → exclude files containing 'test'\n"
+        "    '!^src' → exclude files starting with 'src'\n"
+        "    '!.tmp$' → exclude files ending with '.tmp'\n"
+        "  Complex Examples:\n"
+        "    'config .json$ !test' → JSON config files, excluding test files\n"
+        "    '^src py$ | js$' → files in src/ ending with .py or .js\n"
+        "    ''package.json'' | ''yarn.lock''' → exact package manager files\n\n"
         "Returns: { matches: string[] } or { error: string }"
     )
 )
@@ -148,12 +168,42 @@ def fuzzy_search_files(
         "Search all file contents and fuzzy filter results.\n\n"
         "By default searches ALL lines in files (like 'rg .'), then applies fuzzy filtering.\n\n"
         "Args:\n"
-        "  filter  (str): Fuzzy filter string for results. Required.\n"
+        "  filter  (str): fzf query string with advanced syntax support. Required.\n"
         "  path    (str, optional): Directory/file to search. Defaults to current dir.\n"
         "  pattern (str, optional): Regex pattern for ripgrep. Default '.' (all lines).\n"
         "  hidden  (bool, optional): Search hidden files. Default false.\n"
         "  limit   (int, optional): Max results to return. Default 20.\n"
         "  rg_flags (str, optional): Extra flags for ripgrep.\n\n"
+        "fzf Query Syntax for Content Filtering:\n"
+        "  Content filtering works on 'file:line:content' format from ripgrep.\n"
+        "  Basic Terms: Space-separated for AND logic\n"
+        "    'TODO implement' → lines containing both 'TODO' AND 'implement'\n"
+        "  OR Logic: Use | for alternatives\n"
+        "    'TODO | FIXME | BUG' → lines with any of these markers\n"
+        "  File Filtering: Target specific files in results\n"
+        "    'main.py:' → only results from main.py files\n"
+        "    '.js: function' → function definitions in JS files\n"
+        "  Exact Content: Find exact strings in code\n"
+        "    ''def __init__'' → exact method definition\n"
+        "    'import → partial exact import statements\n"
+        "  Line Position: Filter by line characteristics\n"
+        "    '^src/' → results from files starting with src/\n"
+        "    ':1:' → results from line 1 of files\n"
+        "  Exclude Patterns: Remove unwanted results\n"
+        "    'function !test' → functions not in test files\n"
+        "    'config !.bak$' → config without backup files\n"
+        "  Advanced Examples:\n"
+        "    'class py$: !test' → Python class definitions, excluding tests\n"
+        "    'TODO | FIXME .py: | .js:' → TODOs in Python/JS files\n"
+        "    ''async def'' error' → async functions mentioning errors\n\n"
+        "Useful rg_flags for enhanced search:\n"
+        "  Case: '-i' (ignore case), '-S' (smart case), '-s' (case sensitive)\n"
+        "  Types: '-t py' (Python only), '-T test' (exclude tests)\n"
+        "  Context: '-A 3' (3 lines after), '-B 2' (2 before), '-C 3' (3 both)\n"
+        "  Files: '-.' (include hidden), '--no-ignore' (ignore .gitignore)\n"
+        "  Patterns: '-F' (literal strings), '-w' (whole words), '-v' (invert)\n"
+        "  Multi-line: '-U' (multiline mode), '-P' (PCRE2 regex)\n"
+        "  Examples: '-i -C 2', '-t py --no-ignore', '-F -w'\n\n"
         "Returns: { matches: Array<{file: string, line: number, content: string}> } or { error: string }"
     )
 )
@@ -230,24 +280,27 @@ def fuzzy_search_content(
 
 
 def _cli() -> None:
-    parser = argparse.ArgumentParser(description="Fuzzy search with ripgrep + fzf")
+    parser = argparse.ArgumentParser(
+        description="Fuzzy search with ripgrep + fzf",
+        epilog="fzf syntax: 'term1 term2' (AND), 'a | b' (OR), '^start', 'end$', '!exclude'"
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     # search-files subcommand
     p_files = sub.add_parser("search-files", help="Fuzzy search file paths")
-    p_files.add_argument("filter", help="Fuzzy filter string")
+    p_files.add_argument("filter", help="fzf query: 'config .json$ !test'")
     p_files.add_argument("path", nargs="?", default=".", help="Directory to search")
     p_files.add_argument("--hidden", action="store_true", help="Include hidden files")
     p_files.add_argument("--limit", type=int, default=20, help="Max results")
 
     # search-content subcommand
     p_content = sub.add_parser("search-content", help="Search all content with fuzzy filter")
-    p_content.add_argument("filter", help="Fuzzy filter for results")
+    p_content.add_argument("filter", help="fzf query: 'TODO implement .py: !test'")
     p_content.add_argument("path", nargs="?", default=".", help="Directory/file to search")
     p_content.add_argument("--pattern", default=".", help="Ripgrep pattern (default: all lines)")
     p_content.add_argument("--hidden", action="store_true", help="Search hidden files")
     p_content.add_argument("--limit", type=int, default=20, help="Max results")
-    p_content.add_argument("--rg-flags", default="", help="Extra ripgrep flags")
+    p_content.add_argument("--rg-flags", default="", help="rg flags: '-i -C 3 -t py'")
 
     ns = parser.parse_args()
 

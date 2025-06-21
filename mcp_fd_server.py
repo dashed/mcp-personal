@@ -132,12 +132,18 @@ def search_files(
     description=(
         "Run fd, then fuzzy‑filter with fzf --filter.\n\n"
         "Args:\n"
-        "  filter (str): String passed to fzf --filter. Required.\n"
+        "  filter (str): fzf query string with advanced syntax support. Required.\n"
         "  pattern (str, optional): Pattern for fd (empty = list all).\n"
         "  path    (str, optional): Directory to search. Defaults to current dir.\n"
         "  first   (bool, optional): Return only the best match. Default false.\n"
         "  fd_flags  (str, optional): Extra flags for fd.\n"
         "  fzf_flags (str, optional): Extra flags for fzf.\n\n"
+        "fzf Query Syntax:\n"
+        "  Basic: 'term1 term2' (AND logic), 'term1 | term2' (OR logic)\n"
+        "  Exact: ''exact'' (exact match), 'term (partial exact)\n"
+        "  Position: '^start' (prefix), 'end$' (suffix), '^exact$' (equal)\n"
+        "  Negation: '!exclude' (NOT), '!^prefix' (NOT prefix), '!end$' (NOT suffix)\n"
+        "  Examples: 'config .json$', '^src py$ | js$ | go$', ''main.py'' !test'\n\n"
         "Returns: { matches: string[] } or { error: string }"
     )
 )
@@ -181,7 +187,10 @@ def filter_files(
 
 
 def _cli() -> None:
-    parser = argparse.ArgumentParser(description="fd + fzf powers, CLI mode")
+    parser = argparse.ArgumentParser(
+        description="fd + fzf powers, CLI mode",
+        epilog="fzf query examples: 'config .json$', '^src py$ | js$', ''main.py'' !test'"
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     # search_files sub‑command
@@ -192,7 +201,7 @@ def _cli() -> None:
 
     # filter_files sub‑command
     p_filter = sub.add_parser("filter", help="fd + fzf filter")
-    p_filter.add_argument("filter")
+    p_filter.add_argument("filter", help="fzf query (use quotes: 'config .json$ !test')")
     p_filter.add_argument("pattern", nargs="?", default="")
     p_filter.add_argument("path", nargs="?", default=".")
     p_filter.add_argument("--first", action="store_true")
