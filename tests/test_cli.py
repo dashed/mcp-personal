@@ -2,9 +2,9 @@ import json
 import os
 import subprocess
 import sys
-import pytest
 from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 # Only mark async tests with anyio, not all tests in the file
 
@@ -14,18 +14,18 @@ def test_cli_search_command(tmp_path: Path):
     # Create test files
     (tmp_path / "test.py").write_text("print('hello')")
     (tmp_path / "test.txt").write_text("hello")
-    
+
     # Run search command
     result = subprocess.run(
         [sys.executable, "mcp_fd_server.py", "search", r"\.py$", str(tmp_path)],
         capture_output=True,
-        text=True
+        text=True,
     )
-    
+
     # Skip if fd not available
     if "Cannot find the `fd` binary" in result.stderr:
         pytest.skip("fd not available")
-    
+
     assert result.returncode == 0
     output = json.loads(result.stdout)
     assert "matches" in output
@@ -37,18 +37,26 @@ def test_cli_filter_command(tmp_path: Path):
     # Create test files
     (tmp_path / "main.py").write_text("# main")
     (tmp_path / "minor.py").write_text("# minor")
-    
+
     # Run filter command
     result = subprocess.run(
-        [sys.executable, "mcp_fd_server.py", "filter", "main", r"\.py$", str(tmp_path), "--first"],
+        [
+            sys.executable,
+            "mcp_fd_server.py",
+            "filter",
+            "main",
+            r"\.py$",
+            str(tmp_path),
+            "--first",
+        ],
         capture_output=True,
-        text=True
+        text=True,
     )
-    
+
     # Skip if dependencies not available
     if "Cannot find the" in result.stderr:
         pytest.skip("fd or fzf not available")
-    
+
     assert result.returncode == 0
     output = json.loads(result.stdout)
     assert "matches" in output
@@ -59,11 +67,9 @@ def test_cli_filter_command(tmp_path: Path):
 def test_cli_help():
     """Test CLI help output."""
     result = subprocess.run(
-        [sys.executable, "mcp_fd_server.py", "-h"],
-        capture_output=True,
-        text=True
+        [sys.executable, "mcp_fd_server.py", "-h"], capture_output=True, text=True
     )
-    
+
     assert result.returncode == 0
     assert "fd + fzf powers" in result.stdout
     assert "search" in result.stdout
@@ -74,26 +80,33 @@ def test_cli_search_mocked(tmp_path: Path, monkeypatch):
     """Test CLI search with mocked subprocess behavior."""
     # Create a mock fd executable that returns predefined output
     mock_fd = tmp_path / "fd"
-    mock_fd.write_text('''#!/usr/bin/env python3
+    mock_fd.write_text("""#!/usr/bin/env python3
 import sys
 # Mock fd that ignores all arguments and returns predefined output
 print("src/main.py")
 print("src/test.py")
 if "--hidden" in sys.argv:
     print("src/.hidden/config.py")
-''')
+""")
     mock_fd.chmod(0o755)
-    
+
     # Add the tmp_path to PATH so our mock fd is found first
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
-    
+
     # Run the CLI command with the mock
     result = subprocess.run(
-        [sys.executable, "mcp_fd_server.py", "search", r"\.py$", ".", "--flags=--hidden"],
+        [
+            sys.executable,
+            "mcp_fd_server.py",
+            "search",
+            r"\.py$",
+            ".",
+            "--flags=--hidden",
+        ],
         capture_output=True,
-        text=True
+        text=True,
     )
-    
+
     assert result.returncode == 0
     output = json.loads(result.stdout)
     assert "matches" in output
@@ -110,9 +123,9 @@ def test_mcp_server_mode():
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
     )
-    
+
     try:
         # Send a simple initialize request
         init_request = {
@@ -121,30 +134,31 @@ def test_mcp_server_mode():
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "test", "version": "1.0"}
+                "clientInfo": {"name": "test", "version": "1.0"},
             },
-            "id": 1
+            "id": 1,
         }
-        
+
         proc.stdin.write(f"Content-Length: {len(json.dumps(init_request))}\r\n\r\n")
         proc.stdin.write(json.dumps(init_request))
         proc.stdin.flush()
-        
+
         # Give it a moment to respond
         import time
+
         time.sleep(0.5)
-        
+
         # Terminate the process
         proc.terminate()
         stdout, stderr = proc.communicate(timeout=2)
-        
+
         # Check if binary missing error occurred
         if "Cannot find the" in stderr:
             pytest.skip("Required binaries not available")
-        
+
         # Should have received some output (at least headers)
         assert stdout or not stderr  # Either got output or no error
-        
+
     except subprocess.TimeoutExpired:
         proc.kill()
         pytest.skip("Server process timeout")
@@ -158,49 +172,45 @@ def test_mcp_server_mode():
 async def test_cli_client_fixture(tmp_path: Path, anyio_backend):
     """Test stdio client communication with the MCP server."""
     import shutil
-    from mcp.client.stdio import StdioServerParameters, stdio_client
+
     from mcp.client.session import ClientSession
-    from mcp.types import (
-        ListToolsRequest, 
-        CallToolRequest,
-        TextContent
-    )
-    
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+    from mcp.types import TextContent
+
     # Skip if fd not available
     if not shutil.which("fd") and not shutil.which("fdfind"):
         pytest.skip("fd not available")
-    
+
     # Create test file
     (tmp_path / "test.py").write_text("# test file")
-    
+
     server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["mcp_fd_server.py"]
+        command=sys.executable, args=["mcp_fd_server.py"]
     )
-    
+
     try:
         async with stdio_client(server_params) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 # Initialize the session
                 await session.initialize()
-                
+
                 # List available tools
                 tools_response = await session.list_tools()
                 assert len(tools_response.tools) == 2
                 tool_names = [tool.name for tool in tools_response.tools]
                 assert "search_files" in tool_names
                 assert "filter_files" in tool_names
-                
+
                 # Call search_files
                 result = await session.call_tool(
                     "search_files",
-                    arguments={"pattern": r"\.py$", "path": str(tmp_path)}
+                    arguments={"pattern": r"\.py$", "path": str(tmp_path)},
                 )
-                
+
                 # Check the result
                 assert len(result.content) > 0
                 assert isinstance(result.content[0], TextContent)
-                
+
                 data = json.loads(result.content[0].text)
                 if "error" in data:
                     # If there's an error about missing binaries, skip
@@ -209,7 +219,7 @@ async def test_cli_client_fixture(tmp_path: Path, anyio_backend):
                 else:
                     assert "matches" in data
                     assert any("test.py" in match for match in data["matches"])
-                    
+
     except Exception as e:
         error_msg = str(e)
         if "Cannot find the" in error_msg or "fd" in error_msg:

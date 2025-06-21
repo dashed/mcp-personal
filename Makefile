@@ -7,7 +7,7 @@
 PYTHON := uv run python
 PYTEST := uv run pytest
 TEST_PATH := tests
-SRC_FILES := mcp_fd_server.py
+SRC_FILES := *.py tests/*.py
 COV_REPORT := htmlcov
 
 help: ## Show this help message
@@ -49,23 +49,11 @@ test-cov: ## Run tests with coverage report
 
 lint: ## Run linting checks
 	@echo "Running ruff check..."
-	@if command -v ruff > /dev/null 2>&1; then \
-		uv run ruff check $(SRC_FILES); \
-	else \
-		echo "Installing ruff..."; \
-		uv add --dev ruff; \
-		uv run ruff check $(SRC_FILES); \
-	fi
+	uv run ruff check $(SRC_FILES)
 
 format: ## Format code with ruff
 	@echo "Formatting code..."
-	@if command -v ruff > /dev/null 2>&1; then \
-		uv run ruff format $(SRC_FILES); \
-	else \
-		echo "Installing ruff..."; \
-		uv add --dev ruff; \
-		uv run ruff format $(SRC_FILES); \
-	fi
+	uv run ruff format $(SRC_FILES)
 
 type-check: ## Run type checking with pyright
 	@echo "Running type checks..."

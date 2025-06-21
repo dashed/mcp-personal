@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["mcp>=0.1.0"]
-# 
+#
 # [project.optional-dependencies]
 # dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
 # ///
@@ -54,7 +54,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from typing import Any, Dict, List
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP  # high‑level helper inside the SDK
 
@@ -106,13 +106,13 @@ def search_files(
     pattern: str,
     path: str = ".",
     flags: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return every file or directory matching *pattern* according to fd."""
     if not pattern:
         return {"error": "'pattern' argument is required"}
 
     fd_bin = _require(FD_EXECUTABLE, "fd")
-    cmd: List[str] = [fd_bin, *shlex.split(flags), pattern, path]
+    cmd: list[str] = [fd_bin, *shlex.split(flags), pattern, path]
 
     logger.debug("Running fd: %s", " ".join(shlex.quote(c) for c in cmd))
 
@@ -148,7 +148,7 @@ def filter_files(
     first: bool = False,
     fd_flags: str = "",
     fzf_flags: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Combine fd + fzf in headless filter mode."""
     if not filter:
         return {"error": "'filter' argument is required"}
@@ -156,8 +156,8 @@ def filter_files(
     fd_bin = _require(FD_EXECUTABLE, "fd")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
-    fd_cmd: List[str] = [fd_bin, *shlex.split(fd_flags), pattern, path]
-    fzf_cmd: List[str] = [fzf_bin, "--filter", filter, *shlex.split(fzf_flags)]
+    fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, path]
+    fzf_cmd: list[str] = [fzf_bin, "--filter", filter, *shlex.split(fzf_flags)]
 
     logger.debug("Pipeline: %s | %s", " ".join(fd_cmd), " ".join(fzf_cmd))
 

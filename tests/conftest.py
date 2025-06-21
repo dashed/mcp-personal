@@ -1,7 +1,8 @@
-import pytest
 import sys
-from mcp.client.stdio import StdioServerParameters, stdio_client
+
+import pytest
 from mcp.client.session import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 
 @pytest.fixture
@@ -11,10 +12,9 @@ async def cli_client():
     This runs the script as a subprocess with stdio transport.
     """
     server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["mcp_fd_server.py"]
+        command=sys.executable, args=["mcp_fd_server.py"]
     )
-    
+
     async with stdio_client(server_params) as streams:
         read_stream, write_stream = streams
         client_session = ClientSession(read_stream, write_stream)
