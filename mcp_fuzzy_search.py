@@ -92,7 +92,8 @@ mcp = FastMCP("fuzzy-search")
         "  filter (str): fzf query string with advanced syntax support. Required.\n"
         "  path   (str, optional): Directory to search. Defaults to current dir.\n"
         "  hidden (bool, optional): Include hidden files. Default false.\n"
-        "  limit  (int, optional): Max results to return. Default 20.\n\n"
+        "  limit  (int, optional): Max results to return. Default 20.\n"
+        "  multiline (bool, optional): Enable multiline file content search. Default false.\n\n"
         "fzf Query Syntax (Extended Search Mode):\n"
         "  Basic Terms: Space-separated terms use AND logic (all must match)\n"
         "    'main config' → files containing both 'main' AND 'config'\n"
@@ -113,6 +114,11 @@ mcp = FastMCP("fuzzy-search")
         "    'config .json$ !test' → JSON config files, excluding test files\n"
         "    '^src py$ | js$' → files in src/ ending with .py or .js\n"
         "    ''package.json'' | ''yarn.lock''' → exact package manager files\n\n"
+        "Multiline Mode:\n"
+        "  When enabled, searches through complete file contents instead of just filenames.\n"
+        "  Each file becomes a multiline record with 'filename:' prefix followed by content.\n"
+        "  Useful for finding files containing specific code patterns, configurations, or text.\n"
+        "  Example: 'function.*async' would find files containing async function definitions.\n\n"
         "Returns: { matches: string[] } or { error: string }"
     )
 )
@@ -121,36 +127,84 @@ def fuzzy_search_files(
     path: str = ".",
     hidden: bool = False,
     limit: int = 20,
+    multiline: bool = False,
 ) -> dict[str, Any]:
-    """Find files using ripgrep + fzf fuzzy filtering."""
+    """Find files using ripgrep + fzf fuzzy filtering with optional multiline content search."""
     if not filter:
         return {"error": "'filter' argument is required"}
 
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
-    # Use ripgrep to list all files
-    rg_cmd: list[str] = [rg_bin, "--files"]
-    if hidden:
-        rg_cmd.append("--hidden")
-    rg_cmd.append(path)
-
-    # Pipe through fzf for fuzzy filtering
-    fzf_cmd: list[str] = [fzf_bin, "--filter", filter]
-
-    logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
-
     try:
-        rg_proc = subprocess.Popen(rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        fzf_proc = subprocess.Popen(
-            fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
-        )
-        rg_proc.stdout.close()
+        if multiline:
+            # For multiline mode, get file list first, then read contents
+            rg_list_cmd: list[str] = [rg_bin, "--files"]
+            if hidden:
+                rg_list_cmd.append("--hidden")
+            rg_list_cmd.append(path)
+            
+            # Get file list
+            file_list_result = subprocess.check_output(rg_list_cmd, text=True)
+            file_paths = [p for p in file_list_result.splitlines() if p]
+            
+            # Build multiline input with null separators
+            multiline_input = b""
+            for file_path in file_paths:
+                try:
+                    with open(file_path, 'rb') as f:
+                        content = f.read()
+                        # Create record: filename: + content + null separator
+                        record = f"{file_path}:\n".encode('utf-8') + content + b'\0'
+                        multiline_input += record
+                except (IOError, OSError, UnicodeDecodeError):
+                    continue  # Skip files that can't be read
+            
+            if not multiline_input:
+                return {"matches": []}
+            
+            # Use fzf with multiline support
+            fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
+            
+            fzf_proc = subprocess.Popen(
+                fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
+            )
+            out_bytes, _ = fzf_proc.communicate(multiline_input)
+            
+            # Parse null-separated output
+            matches = []
+            if out_bytes:
+                for chunk in out_bytes.split(b'\0'):
+                    if chunk:
+                        try:
+                            matches.append(chunk.decode('utf-8'))
+                        except UnicodeDecodeError:
+                            matches.append(chunk.decode('utf-8', errors='replace'))
+        else:
+            # Standard mode - file paths only
+            rg_cmd: list[str] = [rg_bin, "--files"]
+            if hidden:
+                rg_cmd.append("--hidden")
+            rg_cmd.append(path)
 
-        out, _ = fzf_proc.communicate()
-        rg_proc.wait()
+            # Pipe through fzf for fuzzy filtering
+            fzf_cmd: list[str] = [fzf_bin, "--filter", filter]
 
-        matches = [p for p in out.splitlines() if p][:limit]
+            logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
+
+            rg_proc = subprocess.Popen(rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            fzf_proc = subprocess.Popen(
+                fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
+            )
+            rg_proc.stdout.close()
+
+            out, _ = fzf_proc.communicate()
+            rg_proc.wait()
+
+            matches = [p for p in out.splitlines() if p]
+
+        # Apply limit
+        matches = matches[:limit]
         return {"matches": matches}
     except subprocess.CalledProcessError as exc:
         return {"error": str(exc)}
@@ -173,7 +227,8 @@ def fuzzy_search_files(
         "  pattern (str, optional): Regex pattern for ripgrep. Default '.' (all lines).\n"
         "  hidden  (bool, optional): Search hidden files. Default false.\n"
         "  limit   (int, optional): Max results to return. Default 20.\n"
-        "  rg_flags (str, optional): Extra flags for ripgrep.\n\n"
+        "  rg_flags (str, optional): Extra flags for ripgrep.\n"
+        "  multiline (bool, optional): Enable multiline record processing. Default false.\n\n"
         "fzf Query Syntax for Content Filtering:\n"
         "  Content filtering works on 'file:line:content' format from ripgrep.\n"
         "  Basic Terms: Space-separated for AND logic\n"
@@ -204,6 +259,11 @@ def fuzzy_search_files(
         "  Patterns: '-F' (literal strings), '-w' (whole words), '-v' (invert)\n"
         "  Multi-line: '-U' (multiline mode), '-P' (PCRE2 regex)\n"
         "  Examples: '-i -C 2', '-t py --no-ignore', '-F -w'\n\n"
+        "Multiline Mode:\n"
+        "  When enabled, treats each file as a single multiline record for filtering.\n"
+        "  Useful for finding files containing multi-line patterns like functions, classes, etc.\n"
+        "  Uses null delimiters for safe handling of complex content.\n"
+        "  Example: 'class.*{.*}' could find entire class definitions.\n\n"
         "Returns: { matches: Array<{file: string, line: number, content: string}> } or { error: string }"
     )
 )
@@ -214,6 +274,7 @@ def fuzzy_search_content(
     hidden: bool = False,
     limit: int = 20,
     rg_flags: str = "",
+    multiline: bool = False,
 ) -> dict[str, Any]:
     """Search all content then apply fuzzy filtering - similar to 'rg . | fzf'."""
     if not filter:
@@ -222,51 +283,124 @@ def fuzzy_search_content(
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
-    # Build ripgrep command
-    rg_cmd: list[str] = [
-        rg_bin,
-        "--line-number",
-        "--no-heading",
-        "--color=never",
-    ]
-    if hidden:
-        rg_cmd.append("--hidden")
-    if rg_flags:
-        rg_cmd.extend(shlex.split(rg_flags))
-    rg_cmd.extend([pattern, path])
-
-    # Pipe through fzf for fuzzy filtering
-    fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--delimiter", ":"]
-
-    logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
-
     try:
-        rg_proc = subprocess.Popen(rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        fzf_proc = subprocess.Popen(
-            fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
-        )
-        rg_proc.stdout.close()
+        if multiline:
+            # For multiline mode, get files and treat each as a single record
+            rg_list_cmd: list[str] = [rg_bin, "--files"]
+            if hidden:
+                rg_list_cmd.append("--hidden")
+            if rg_flags:
+                # Filter out options that don't apply to --files
+                safe_flags = []
+                for flag in shlex.split(rg_flags):
+                    if flag not in ["-n", "--line-number", "-H", "--with-filename", "--no-heading"]:
+                        safe_flags.append(flag)
+                rg_list_cmd.extend(safe_flags)
+            rg_list_cmd.append(path)
+            
+            # Get file list
+            file_list_result = subprocess.check_output(rg_list_cmd, text=True)
+            file_paths = [p for p in file_list_result.splitlines() if p]
+            
+            # Build multiline input with file contents
+            multiline_input = b""
+            for file_path in file_paths:
+                try:
+                    with open(file_path, 'rb') as f:
+                        content = f.read()
+                        # Only include files that match the pattern if not default
+                        if pattern != ".":
+                            # Quick check if pattern matches in content
+                            try:
+                                import re
+                                if not re.search(pattern.encode('utf-8'), content, re.IGNORECASE):
+                                    continue
+                            except re.error:
+                                # If pattern is invalid regex, treat as literal
+                                if pattern.encode('utf-8') not in content:
+                                    continue
+                        
+                        # Create record: filename + content + null separator
+                        record = f"{file_path}:\n".encode('utf-8') + content + b'\0'
+                        multiline_input += record
+                except (IOError, OSError, UnicodeDecodeError):
+                    continue
+            
+            if not multiline_input:
+                return {"matches": []}
+            
+            # Use fzf with multiline support
+            fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
+            
+            fzf_proc = subprocess.Popen(
+                fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
+            )
+            out_bytes, _ = fzf_proc.communicate(multiline_input)
+            
+            # Parse multiline results - return as file records
+            matches = []
+            if out_bytes:
+                for chunk in out_bytes.split(b'\0'):
+                    if chunk:
+                        try:
+                            decoded = chunk.decode('utf-8')
+                            # Extract filename from first line
+                            if ':' in decoded:
+                                file_part, content_part = decoded.split(':', 1)
+                                matches.append({
+                                    "file": file_part.strip(),
+                                    "line": 1,  # Multiline records don't have specific line numbers
+                                    "content": content_part.strip()[:200] + "..." if len(content_part) > 200 else content_part.strip()
+                                })
+                        except UnicodeDecodeError:
+                            continue
+        else:
+            # Standard mode - line-by-line results
+            rg_cmd: list[str] = [
+                rg_bin,
+                "--line-number",
+                "--no-heading",
+                "--color=never",
+            ]
+            if hidden:
+                rg_cmd.append("--hidden")
+            if rg_flags:
+                rg_cmd.extend(shlex.split(rg_flags))
+            rg_cmd.extend([pattern, path])
 
-        out, _ = fzf_proc.communicate()
-        rg_stderr = rg_proc.stderr.read().decode() if rg_proc.stderr else ""
-        rg_proc.wait()
+            # Pipe through fzf for fuzzy filtering
+            fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--delimiter", ":"]
 
-        if rg_proc.returncode != 0 and rg_proc.returncode != 1:  # 1 = no matches
-            return {"error": rg_stderr.strip() or f"ripgrep failed with code {rg_proc.returncode}"}
+            logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
-        # Parse results
-        matches = []
-        for line in out.splitlines()[:limit]:
-            if not line:
-                continue
-            parts = line.split(":", 2)
-            if len(parts) >= 3:
-                matches.append({
-                    "file": parts[0],
-                    "line": int(parts[1]),
-                    "content": parts[2].strip(),
-                })
+            rg_proc = subprocess.Popen(rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            fzf_proc = subprocess.Popen(
+                fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
+            )
+            rg_proc.stdout.close()
 
+            out, _ = fzf_proc.communicate()
+            rg_stderr = rg_proc.stderr.read().decode() if rg_proc.stderr else ""
+            rg_proc.wait()
+
+            if rg_proc.returncode != 0 and rg_proc.returncode != 1:  # 1 = no matches
+                return {"error": rg_stderr.strip() or f"ripgrep failed with code {rg_proc.returncode}"}
+
+            # Parse results
+            matches = []
+            for line in out.splitlines():
+                if not line:
+                    continue
+                parts = line.split(":", 2)
+                if len(parts) >= 3:
+                    matches.append({
+                        "file": parts[0],
+                        "line": int(parts[1]),
+                        "content": parts[2].strip(),
+                    })
+
+        # Apply limit
+        matches = matches[:limit]
         return {"matches": matches}
     except subprocess.CalledProcessError as exc:
         return {"error": str(exc)}
@@ -292,6 +426,7 @@ def _cli() -> None:
     p_files.add_argument("path", nargs="?", default=".", help="Directory to search")
     p_files.add_argument("--hidden", action="store_true", help="Include hidden files")
     p_files.add_argument("--limit", type=int, default=20, help="Max results")
+    p_files.add_argument("--multiline", action="store_true", help="Search file contents (multiline)")
 
     # search-content subcommand
     p_content = sub.add_parser("search-content", help="Search all content with fuzzy filter")
@@ -301,14 +436,15 @@ def _cli() -> None:
     p_content.add_argument("--hidden", action="store_true", help="Search hidden files")
     p_content.add_argument("--limit", type=int, default=20, help="Max results")
     p_content.add_argument("--rg-flags", default="", help="rg flags: '-i -C 3 -t py'")
+    p_content.add_argument("--multiline", action="store_true", help="Multiline record processing")
 
     ns = parser.parse_args()
 
     if ns.cmd == "search-files":
-        res = fuzzy_search_files(ns.filter, ns.path, ns.hidden, ns.limit)
+        res = fuzzy_search_files(ns.filter, ns.path, ns.hidden, ns.limit, ns.multiline)
     else:
         res = fuzzy_search_content(
-            ns.filter, ns.path, ns.pattern, ns.hidden, ns.limit, ns.rg_flags
+            ns.filter, ns.path, ns.pattern, ns.hidden, ns.limit, ns.rg_flags, ns.multiline
         )
 
     print(json.dumps(res, indent=2))

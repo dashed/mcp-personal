@@ -396,3 +396,220 @@ async def test_fuzzy_search_content_mocked(mock_popen):
             assert data["matches"][0]["file"] == "src/app.py"
             assert data["matches"][0]["line"] == 10
             assert "implement feature" in data["matches"][0]["content"]
+
+
+# Multiline support tests
+
+import os
+
+
+monkeypatch = pytest.MonkeyPatch()
+
+
+def test_fuzzy_search_files_multiline(tmp_path: Path):
+    """Test multiline support in fuzzy_search_files."""
+    # Create test files with content
+    test_file1 = tmp_path / "code.js"
+    test_file1.write_text("function example() {\n  return 'hello';\n}\n\nclass TestClass {\n  constructor() {}\n}")
+    
+    test_file2 = tmp_path / "data.py"
+    test_file2.write_text("def process():\n    print('processing')")
+    
+    mock_rg = tmp_path / "rg"
+    mock_rg.write_text(f'''#!/usr/bin/env python3
+import sys
+if "--files" in sys.argv:
+    print("{test_file1}")
+    print("{test_file2}")
+''')
+    mock_rg.chmod(0o755)
+    
+    mock_fzf = tmp_path / "fzf"
+    mock_fzf.write_text(f'''#!/usr/bin/env python3
+import sys
+if "--read0" in sys.argv and "--print0" in sys.argv:
+    # Read null-delimited input
+    data = sys.stdin.buffer.read()
+    # Look for "function" in the content
+    if b"function" in data:
+        # Return matching file record with null terminator
+        content = "{test_file1}:\\nfunction example() {{\\n  return 'hello';\\n}}\\n\\nclass TestClass {{\\n  constructor() {{}}\\n}}"
+        print(content, end="\\0")
+''')
+    mock_fzf.chmod(0o755)
+    
+    with monkeypatch.context() as m:
+        m.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+        
+        # Reload module globals to pick up new executables
+        mcp_fuzzy_search.RG_EXECUTABLE = shutil.which("rg")
+        mcp_fuzzy_search.FZF_EXECUTABLE = shutil.which("fzf")
+        
+        result = mcp_fuzzy_search.fuzzy_search_files("function", str(tmp_path), multiline=True)
+        
+        assert "matches" in result
+        matches = result["matches"]
+        assert len(matches) > 0
+        assert "function example()" in matches[0]
+        assert "class TestClass" in matches[0]
+
+
+def test_fuzzy_search_content_multiline(tmp_path: Path):
+    """Test multiline support in fuzzy_search_content."""
+    # Create test files with multi-line patterns
+    test_file1 = tmp_path / "service.py"
+    test_file1.write_text("""
+class UserService:
+    def authenticate(self, user):
+        if user.is_valid:
+            return True
+        return False
+
+def process_request():
+    pass
+""")
+    
+    test_file2 = tmp_path / "model.py"
+    test_file2.write_text("class User:\n    def __init__(self):\n        self.name = ''\n        self.email = ''")
+    
+    mock_rg = tmp_path / "rg"
+    mock_rg.write_text(f'''#!/usr/bin/env python3
+import sys
+if "--files" in sys.argv:
+    print("{test_file1}")
+    print("{test_file2}")
+''')
+    mock_rg.chmod(0o755)
+    
+    mock_fzf = tmp_path / "fzf"
+    mock_fzf.write_text(f'''#!/usr/bin/env python3
+import sys
+if "--read0" in sys.argv and "--print0" in sys.argv:
+    # Read null-delimited input
+    data = sys.stdin.buffer.read()
+    # Look for "class.*:" pattern in the content
+    if b"class" in data:
+        # Return matching file record with null terminator
+        content = "{test_file1}:\\nclass UserService:\\n    def authenticate(self, user):\\n        if user.is_valid:\\n            return True\\n        return False"
+        print(content, end="\\0")
+''')
+    mock_fzf.chmod(0o755)
+    
+    with monkeypatch.context() as m:
+        m.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+        
+        # Reload module globals to pick up new executables
+        mcp_fuzzy_search.RG_EXECUTABLE = shutil.which("rg")
+        mcp_fuzzy_search.FZF_EXECUTABLE = shutil.which("fzf")
+        
+        result = mcp_fuzzy_search.fuzzy_search_content("class", str(tmp_path), multiline=True)
+        
+        assert "matches" in result
+        matches = result["matches"]
+        assert len(matches) > 0
+        assert matches[0]["file"] == str(test_file1)
+        assert "class UserService:" in matches[0]["content"]
+        assert "def authenticate" in matches[0]["content"]
+
+
+def test_multiline_cli_support():
+    """Test CLI support for multiline flags."""
+    # Test search-files multiline
+    with patch('mcp_fuzzy_search.fuzzy_search_files') as mock_search_files:
+        mock_search_files.return_value = {"matches": ["file1.txt"]}
+        
+        with patch('sys.argv', ['mcp_fuzzy_search.py', 'search-files', 'test', '.', '--multiline']):
+            mcp_fuzzy_search._cli()
+            
+        # Verify multiline=True was passed - check both positional and keyword args
+        mock_search_files.assert_called_once()
+        call_args = mock_search_files.call_args
+        # Function signature: fuzzy_search_files(filter, path, hidden, limit, multiline)
+        if len(call_args[0]) > 4:
+            assert call_args[0][4] is True  # positional argument
+        else:
+            assert call_args[1].get('multiline') is True
+    
+    # Test search-content multiline
+    with patch('mcp_fuzzy_search.fuzzy_search_content') as mock_search_content:
+        mock_search_content.return_value = {"matches": []}
+        
+        with patch('sys.argv', ['mcp_fuzzy_search.py', 'search-content', 'test', '.', '--multiline']):
+            mcp_fuzzy_search._cli()
+            
+        # Verify multiline=True was passed
+        mock_search_content.assert_called_once()
+        call_args = mock_search_content.call_args
+        # Function signature: fuzzy_search_content(filter, path, pattern, hidden, limit, rg_flags, multiline) 
+        if len(call_args[0]) > 6:
+            assert call_args[0][6] is True  # positional argument
+        else:
+            assert call_args[1].get('multiline') is True
+
+
+async def test_fuzzy_search_files_multiline_mcp():
+    """Test multiline support through MCP interface for fuzzy_search_files."""
+    test_content = "async function processData() {\n  const result = await fetch('/api');\n  return result.json();\n}"
+    
+    with patch('builtins.open', create=True) as mock_open:
+        mock_open.return_value.__enter__.return_value.read.return_value = test_content.encode()
+        
+        with (
+            patch.object(mcp_fuzzy_search, "RG_EXECUTABLE", "/mock/rg"),
+            patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"),
+            patch("subprocess.check_output") as mock_rg_output,
+            patch("subprocess.Popen") as mock_popen
+        ):
+            # Mock rg listing files
+            mock_rg_output.return_value = "api.js\n"
+            
+            # Mock fzf finding the async function
+            mock_fzf_proc = MagicMock()
+            mock_fzf_proc.communicate.return_value = (b"api.js:\nasync function processData() {\n  const result = await fetch('/api');\n  return result.json();\n}\x00", b"")
+            mock_popen.return_value = mock_fzf_proc
+            
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                result = await client.call_tool(
+                    "fuzzy_search_files", 
+                    {"filter": "async", "multiline": True}
+                )
+                
+                data = json.loads(result.content[0].text)
+                assert "matches" in data
+                assert len(data["matches"]) > 0
+                assert "async function processData()" in data["matches"][0]
+
+
+async def test_fuzzy_search_content_multiline_mcp():
+    """Test multiline support through MCP interface for fuzzy_search_content."""
+    test_content = "class DatabaseService {\n  constructor(config) {\n    this.config = config;\n  }\n\n  async connect() {\n    // TODO: implement\n  }\n}"
+    
+    with patch('builtins.open', create=True) as mock_open:
+        mock_open.return_value.__enter__.return_value.read.return_value = test_content.encode()
+        
+        with (
+            patch.object(mcp_fuzzy_search, "RG_EXECUTABLE", "/mock/rg"),
+            patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"),
+            patch("subprocess.check_output") as mock_rg_output,
+            patch("subprocess.Popen") as mock_popen
+        ):
+            # Mock rg listing files
+            mock_rg_output.return_value = "service.js\n"
+            
+            # Mock fzf finding the class
+            mock_fzf_proc = MagicMock()
+            mock_fzf_proc.communicate.return_value = (b"service.js:\nclass DatabaseService {\n  constructor(config) {\n    this.config = config;\n  }\n\n  async connect() {\n    // TODO: implement\n  }\n}\x00", b"")
+            mock_popen.return_value = mock_fzf_proc
+            
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                result = await client.call_tool(
+                    "fuzzy_search_content", 
+                    {"filter": "class", "multiline": True}
+                )
+                
+                data = json.loads(result.content[0].text)
+                assert "matches" in data
+                assert len(data["matches"]) > 0
+                assert data["matches"][0]["file"] == "service.js"
+                assert "class DatabaseService" in data["matches"][0]["content"]
+                assert "async connect()" in data["matches"][0]["content"]
