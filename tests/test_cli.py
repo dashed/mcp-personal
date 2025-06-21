@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import pytest
@@ -69,11 +70,36 @@ def test_cli_help():
     assert "filter" in result.stdout
 
 
-def test_cli_search_mocked():
-    """Test CLI search with mocked subprocess."""
-    # This test would require deeper mocking of the subprocess module
-    # Since we have working direct tests in test_simple.py, we can skip this
-    pytest.skip("Complex subprocess mocking not needed with direct function tests available")
+def test_cli_search_mocked(tmp_path: Path, monkeypatch):
+    """Test CLI search with mocked subprocess behavior."""
+    # Create a mock fd executable that returns predefined output
+    mock_fd = tmp_path / "fd"
+    mock_fd.write_text('''#!/usr/bin/env python3
+import sys
+# Mock fd that ignores all arguments and returns predefined output
+print("src/main.py")
+print("src/test.py")
+if "--hidden" in sys.argv:
+    print("src/.hidden/config.py")
+''')
+    mock_fd.chmod(0o755)
+    
+    # Add the tmp_path to PATH so our mock fd is found first
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+    
+    # Run the CLI command with the mock
+    result = subprocess.run(
+        [sys.executable, "mcp_fd_server.py", "search", r"\.py$", ".", "--flags=--hidden"],
+        capture_output=True,
+        text=True
+    )
+    
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert "matches" in output
+    assert len(output["matches"]) == 3
+    assert "src/main.py" in output["matches"]
+    assert "src/.hidden/config.py" in output["matches"]
 
 
 def test_mcp_server_mode():
@@ -128,39 +154,64 @@ def test_mcp_server_mode():
 
 
 @pytest.mark.anyio
-@pytest.mark.skip(reason="CLI client fixture hangs in subprocess mode")
-async def test_cli_client_fixture(tmp_path: Path, cli_client):
-    """Test the CLI client fixture for end-to-end testing."""
+@pytest.mark.parametrize("anyio_backend", ["asyncio", "trio"])
+async def test_cli_client_fixture(tmp_path: Path, anyio_backend):
+    """Test stdio client communication with the MCP server."""
+    import shutil
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+    from mcp.client.session import ClientSession
+    from mcp.types import (
+        ListToolsRequest, 
+        CallToolRequest,
+        TextContent
+    )
+    
+    # Skip if fd not available
+    if not shutil.which("fd") and not shutil.which("fdfind"):
+        pytest.skip("fd not available")
+    
     # Create test file
     (tmp_path / "test.py").write_text("# test file")
     
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=["mcp_fd_server.py"]
+    )
+    
     try:
-        # List available tools
-        from mcp.types import ListToolsRequest, ClientRequest, ToolRequest
-        import json
-        
-        tools_result = await cli_client.send_request(
-            ClientRequest(ListToolsRequest(method="tools/list"))
-        )
-        assert len(tools_result.tools) == 2
-        
-        # Call search_files through subprocess client
-        result = await cli_client.send_request(
-            ClientRequest(
-                ToolRequest(
-                    method="tools/call",
-                    params={
-                        "name": "search_files",
-                        "arguments": {"pattern": r"\.py$", "path": str(tmp_path)}
-                    }
+        async with stdio_client(server_params) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                # Initialize the session
+                await session.initialize()
+                
+                # List available tools
+                tools_response = await session.list_tools()
+                assert len(tools_response.tools) == 2
+                tool_names = [tool.name for tool in tools_response.tools]
+                assert "search_files" in tool_names
+                assert "filter_files" in tool_names
+                
+                # Call search_files
+                result = await session.call_tool(
+                    "search_files",
+                    arguments={"pattern": r"\.py$", "path": str(tmp_path)}
                 )
-            )
-        )
-        
-        data = json.loads(result.content[0].text)
-        assert "matches" in data or "error" in data
-        
+                
+                # Check the result
+                assert len(result.content) > 0
+                assert isinstance(result.content[0], TextContent)
+                
+                data = json.loads(result.content[0].text)
+                if "error" in data:
+                    # If there's an error about missing binaries, skip
+                    if "Cannot find the" in data["error"]:
+                        pytest.skip("Required binaries not available")
+                else:
+                    assert "matches" in data
+                    assert any("test.py" in match for match in data["matches"])
+                    
     except Exception as e:
-        if "Cannot find the" in str(e):
+        error_msg = str(e)
+        if "Cannot find the" in error_msg or "fd" in error_msg:
             pytest.skip("Required binaries not available")
         raise
