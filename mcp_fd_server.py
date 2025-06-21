@@ -2,44 +2,47 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = ["mcp>=0.1.0"]
+# 
+# [project.optional-dependencies]
+# dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
 # ///
 """
-`mcp_fd_server.py` – An MCP server that exposes lightning‑fast file search and
-fuzzy filtering powered by **fd** and **fzf**.
+`mcp_fd_server.py` – Minimal but complete **Model Context Protocol** server
+(implemented with the official **FastMCP** helper that ships inside the
+`mcp` Python SDK) exposing two file‑search tools powered by **fd** and
+**fzf**.
 
-Two tools are available inside Claude Code once you register the server:
+Tools exposed to LLMs
+--------------------
+* **`search_files`** – list files using `fd` (fast `find`).
+* **`filter_files`** – pipe the `fd` output through `fzf --filter` for fuzzy,
+  *headless* matching (perfect for non‑interactive stdio environments).
 
-* **`search_files`** – run `fd` and return every match as a list.
-* **`filter_files`** – pipe the `fd` output through *fzf*'s non‑interactive
-  `--filter` mode and return the filtered subset (or the single best match if
-  `--first` is requested).
-
-Why use `--filter` instead of interactive TUI? Claude Code talks to the server
-via stdio—not a TTY—so interactive mode would hang. The `--filter` flag lets us
-keep all of fzf’s fuzzy‑matching goodness in a headless context.
-
-Example prompts
----------------
-```
-/ search_files pattern:"\\.rs$" path:"src" flags:"--hidden"
-/ filter_files pattern:"" path:"." filter:"main" first:true
-```
-
-The second call prints the **first** file whose fuzzy score matches "main" best
-according to fzf.
-
-Shebang & dependencies
-----------------------
-The script is completely self‑contained thanks to the `uv --script` shebang and
-inline dependency block. Make it executable (`chmod +x ...`) and either:
-
+Quick start
+-----------
 ```bash
-./mcp_fd_server.py               # CLI mode (see --help)
-claude mcp add fd-fzf ./mcp_fd_server.py   # MCP mode for Claude Code
+# Make sure binaries are on PATH first
+brew install fd fzf bat      # macOS example
+# or apt install fd-find fzf bat   # Debian/Ubuntu (symlink fdfind→fd)
+
+chmod +x mcp_fd_server.py    # mark as executable
+
+# 1. Stand‑alone CLI helper
+./mcp_fd_server.py search "\\.py$" src --flags "--hidden"  # lists .py files
+./mcp_fd_server.py filter main "" . --first                # best fuzzy match
+
+# 2. Run as MCP stdio server (for Claude Code / Inspector)
+./mcp_fd_server.py           # blocks, prints MCP init JSON
 ```
 
-Python depends only on `mcp>=0.1.0`; the external binaries **fd**, **fzf**, and
-optionally **bat** (for preview) must be on `$PATH`.
+Internals
+---------
+* Uses **FastMCP** for attribute‑based discovery (`@mcp.tool`). No manual
+  server boilerplate needed—just call `mcp.run()`.
+* Shebang **uv run --script** + inline `[dependencies]` block means the first
+  launch automatically installs the `mcp` SDK into an isolated cache.
+* All error cases return structured JSON `{ "error": "..." }` so the LLM can
+  react programmatically.
 """
 
 from __future__ import annotations
@@ -47,15 +50,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import shlex
 import shutil
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any, Dict, List
 
-from mcp import start_server, tool
+from mcp.server.fastmcp import FastMCP  # high‑level helper inside the SDK
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -81,29 +82,34 @@ def _require(binary: str | None, name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# MCP tools
+# FastMCP server instance
+# ---------------------------------------------------------------------------
+
+mcp = FastMCP("fd-fzf")
+
+# ---------------------------------------------------------------------------
+# Tool: search_files
 # ---------------------------------------------------------------------------
 
 
-@tool(
-    name="search_files",
+@mcp.tool(
     description=(
         "Find files using *fd*.\n\n"
-        "Parameters:\n"
+        "Args:\n"
         "  pattern (str): Regex or glob to match. Required.\n"
-        "  path (str, optional): Directory to search. Defaults to current dir.\n"
-        "  flags (str, optional): Extra flags forwarded to fd.\n\n"
+        "  path    (str, optional): Directory to search. Defaults to current dir.\n"
+        "  flags   (str, optional): Extra flags forwarded to fd.\n\n"
         "Returns: { matches: string[] } or { error: string }"
-    ),
+    )
 )
-def search_files(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Return every file/directory that matches *pattern* according to fd."""
-    pattern = params.get("pattern")
+def search_files(
+    pattern: str,
+    path: str = ".",
+    flags: str = "",
+) -> Dict[str, Any]:
+    """Return every file or directory matching *pattern* according to fd."""
     if not pattern:
         return {"error": "'pattern' argument is required"}
-
-    path = params.get("path", ".")
-    flags = params.get("flags", "")
 
     fd_bin = _require(FD_EXECUTABLE, "fd")
     cmd: List[str] = [fd_bin, *shlex.split(flags), pattern, path]
@@ -117,47 +123,48 @@ def search_files(params: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": exc.output.strip() or str(exc)}
 
 
-@tool(
-    name="filter_files",
+# ---------------------------------------------------------------------------
+# Tool: filter_files
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
     description=(
         "Run fd, then fuzzy‑filter with fzf --filter.\n\n"
-        "Parameters:\n"
-        "  pattern (str): Pattern for fd (can be empty to list all).\n"
+        "Args:\n"
         "  filter (str): String passed to fzf --filter. Required.\n"
-        "  path (str, optional): Directory to search. Defaults to current dir.\n"
-        "  first (bool, optional): Return only the best match. Default false.\n"
-        "  fd_flags (str, optional): Extra flags to fd.\n"
-        "  fzf_flags (str, optional): Extra flags to fzf (e.g. '--no-sort').\n\n"
+        "  pattern (str, optional): Pattern for fd (empty = list all).\n"
+        "  path    (str, optional): Directory to search. Defaults to current dir.\n"
+        "  first   (bool, optional): Return only the best match. Default false.\n"
+        "  fd_flags  (str, optional): Extra flags for fd.\n"
+        "  fzf_flags (str, optional): Extra flags for fzf.\n\n"
         "Returns: { matches: string[] } or { error: string }"
-    ),
+    )
 )
-def filter_files(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Combine fd + fzf in non‑interactive filter mode."""
-    filter_str = params.get("filter")
-    if not filter_str:
+def filter_files(
+    filter: str,
+    pattern: str = "",
+    path: str = ".",
+    first: bool = False,
+    fd_flags: str = "",
+    fzf_flags: str = "",
+) -> Dict[str, Any]:
+    """Combine fd + fzf in headless filter mode."""
+    if not filter:
         return {"error": "'filter' argument is required"}
-
-    pattern = params.get("pattern", "")
-    path = params.get("path", ".")
-    first = bool(params.get("first", False))
-    fd_flags = params.get("fd_flags", "")
-    fzf_flags = params.get("fzf_flags", "")
 
     fd_bin = _require(FD_EXECUTABLE, "fd")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
-    fd_cmd = [fd_bin, *shlex.split(fd_flags), pattern, path]
-    fzf_cmd = [fzf_bin, "--filter", filter_str, *shlex.split(fzf_flags)]
-
-    if first:
-        fzf_cmd.append("--nth=1")  # first match only
+    fd_cmd: List[str] = [fd_bin, *shlex.split(fd_flags), pattern, path]
+    fzf_cmd: List[str] = [fzf_bin, "--filter", filter, *shlex.split(fzf_flags)]
 
     logger.debug("Pipeline: %s | %s", " ".join(fd_cmd), " ".join(fzf_cmd))
 
     try:
         fd_proc = subprocess.Popen(fd_cmd, stdout=subprocess.PIPE)
         out = subprocess.check_output(fzf_cmd, stdin=fd_proc.stdout, text=True)
-        fd_proc.stdout.close()  # allow fd to receive SIGPIPE if fzf exits early
+        fd_proc.stdout.close()
         fd_proc.wait()
 
         matches = [p for p in out.splitlines() if p]
@@ -195,9 +202,11 @@ def _cli() -> None:
     ns = parser.parse_args()
 
     if ns.cmd == "search":
-        res = search_files(vars(ns))
+        res = search_files(ns.pattern, ns.path, ns.flags)
     else:
-        res = filter_files(vars(ns))
+        res = filter_files(
+            ns.filter, ns.pattern, ns.path, ns.first, ns.fd_flags, ns.fzf_flags
+        )
 
     print(json.dumps(res, indent=2))
 
@@ -208,10 +217,9 @@ def _cli() -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        _cli()  # invoked with args → behave like CLI helper
+        _cli()
     else:
-        logger.info("Starting MCP server exposing search_files & filter_files tools")
-        # Fail early if required binaries are missing.
+        # Ensure required binaries before exposing tools to LLMs
         _require(FD_EXECUTABLE, "fd")
         _require(FZF_EXECUTABLE, "fzf")
-        start_server(globals())
+        mcp.run()  # defaults to stdio transport
