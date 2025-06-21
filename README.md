@@ -11,6 +11,14 @@ Powerful file search capabilities using `fd` and `fzf`:
 - **Regex and glob pattern** support
 - **Standalone CLI** for testing and direct usage
 
+### 2. Fuzzy Search Server (`mcp_fuzzy_search.py`)
+Advanced content search using `ripgrep` and `fzf`:
+- **Content search** using `ripgrep` for fast text searching across files
+- **Fuzzy filtering** of search results using `fzf --filter`
+- **Non-interactive** operation perfect for MCP integration
+- **File path fuzzy search** for finding files by name patterns
+- **Standalone CLI** for testing and direct usage
+
 ### More servers coming soon...
 This repository will grow to include additional MCP servers for various tasks.
 
@@ -38,6 +46,23 @@ sudo apt install fd-find fzf
 - [fd installation guide](https://github.com/sharkdp/fd#installation)
 - [fzf installation guide](https://github.com/junegunn/fzf#installation)
 
+### Fuzzy Search Server Requirements
+The fuzzy search server requires:
+
+#### macOS
+```bash
+brew install ripgrep fzf
+```
+
+#### Ubuntu/Debian
+```bash
+sudo apt install ripgrep fzf
+```
+
+#### Other Systems
+- [ripgrep installation guide](https://github.com/BurntSushi/ripgrep#installation)
+- [fzf installation guide](https://github.com/junegunn/fzf#installation)
+
 ## Installation
 
 ### Clone the Repository
@@ -56,6 +81,9 @@ Each server can be configured independently in Claude Desktop. Add the desired s
   "mcpServers": {
     "file-search": {
       "command": "/path/to/mcp-personal/mcp_fd_server.py"
+    },
+    "fuzzy-search": {
+      "command": "/path/to/mcp-personal/mcp_fuzzy_search.py"
     }
     // Add more servers here as they become available
   }
@@ -109,6 +137,31 @@ The file search server also works as a standalone CLI tool:
 ./mcp_fd_server.py filter "app" "" . --first
 ```
 
+### Fuzzy Search Server
+
+#### As an MCP Server
+
+Once configured in Claude Desktop, you can use natural language for advanced searching:
+
+- "Search for TODO comments that mention 'implement'"
+- "Find all files with 'test' in the name using fuzzy search"
+- "Look for error handling code in Python files"
+- "Search for configuration files containing database settings"
+
+#### CLI Usage
+
+The fuzzy search server also works as a standalone CLI tool:
+
+```bash
+# Fuzzy search for file paths
+./mcp_fuzzy_search.py search-files "main" /path/to/search
+./mcp_fuzzy_search.py search-files "test" . --hidden --limit 10
+
+# Search all content and filter with fzf (like 'rg . | fzf')
+./mcp_fuzzy_search.py search-content "implement" . --pattern "TODO"
+./mcp_fuzzy_search.py search-content "handle" src --pattern "error|exception" --rg-flags "-i"
+```
+
 ## MCP Tools Documentation
 
 ### File Search Server Tools
@@ -151,15 +204,60 @@ Search for files and filter results using fzf's fuzzy matching.
 }
 ```
 
+### Fuzzy Search Server Tools
+
+#### `fuzzy_search_files`
+Search for file paths using fuzzy matching.
+
+**Parameters:**
+- `filter` (required): Fuzzy search string
+- `path` (optional): Directory to search in (defaults to current directory)
+- `hidden` (optional): Include hidden files (default: false)
+- `limit` (optional): Maximum results to return (default: 20)
+
+**Example:**
+```python
+{
+  "filter": "main",
+  "path": "/home/user/projects",
+  "hidden": true,
+  "limit": 10
+}
+```
+
+#### `fuzzy_search_content`
+Search all file contents (like 'rg . | fzf'), then apply fuzzy filtering.
+
+**Parameters:**
+- `filter` (required): Fuzzy filter string for results
+- `path` (optional): Directory/file to search in (defaults to current directory)
+- `pattern` (optional): Regex pattern for ripgrep (default: '.' - all lines)
+- `hidden` (optional): Search hidden files (default: false)
+- `limit` (optional): Maximum results to return (default: 20)
+- `rg_flags` (optional): Extra flags for ripgrep
+
+**Example:**
+```python
+{
+  "filter": "implement",
+  "path": "./src",
+  "pattern": "TODO|FIXME",
+  "rg_flags": "-i",
+  "limit": 15
+}
+```
+
 ## Development
 
 ### Project Structure
 ```
 mcp-personal/
 ├── mcp_fd_server.py      # File search MCP server
+├── mcp_fuzzy_search.py   # Fuzzy content search MCP server
 ├── tests/                # Test suite
 │   ├── test_simple.py    # Direct function tests
-│   ├── test_fd_server.py # MCP integration tests
+│   ├── test_fd_server.py # File search MCP integration tests
+│   ├── test_fuzzy_search.py # Fuzzy search tests
 │   └── test_cli.py       # CLI interface tests
 ├── pyproject.toml        # Project configuration
 ├── Makefile              # Development commands
@@ -227,6 +325,11 @@ Additionally uses:
 - **fd**: Modern file finder written in Rust
 - **fzf**: Command-line fuzzy finder
 
+### Fuzzy Search Server
+Additionally uses:
+- **ripgrep**: Extremely fast search tool that respects gitignore
+- **fzf**: Command-line fuzzy finder (used in filter mode)
+
 ## Security Considerations
 
 ### General
@@ -238,6 +341,12 @@ Additionally uses:
 - Has filesystem access based on user permissions
 - Be cautious when searching in sensitive directories
 - The `--no-ignore` flag will include files normally hidden by `.gitignore`
+
+### Fuzzy Search Server
+- Has filesystem read access based on user permissions
+- Can search file contents, including source code and configuration files
+- Respects `.gitignore` by default (use `--hidden` to include ignored files)
+- Be mindful when searching in repositories with sensitive data
 
 ## Troubleshooting
 
@@ -266,4 +375,8 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ### File Search Server
 - [fd](https://github.com/sharkdp/fd) - A simple, fast and user-friendly alternative to find
+- [fzf](https://github.com/junegunn/fzf) - A command-line fuzzy finder
+
+### Fuzzy Search Server
+- [ripgrep](https://github.com/BurntSushi/ripgrep) - Recursively search directories for a regex pattern
 - [fzf](https://github.com/junegunn/fzf) - A command-line fuzzy finder

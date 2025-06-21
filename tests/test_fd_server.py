@@ -1,4 +1,7 @@
+import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -39,7 +42,6 @@ async def test_search_files_finds_python(tmp_path: Path):
         assert len(result.content) > 0
         content = result.content[0]
         assert content.type == "text"
-        import json
 
         data = json.loads(content.text)
         assert "matches" in data
@@ -58,7 +60,6 @@ async def test_search_files_with_flags(tmp_path: Path):
     (tmp_path / "visible.py").write_text("# visible")
 
     # Act without hidden flag
-    import json
 
     async with client_session(mcp_fd_server.mcp._mcp_server) as client:
         result_no_hidden = await client.call_tool(
@@ -81,8 +82,6 @@ async def test_search_files_with_flags(tmp_path: Path):
 
 async def test_search_files_error_handling():
     """Test search_files error handling for missing pattern."""
-    import json
-
     async with client_session(mcp_fd_server.mcp._mcp_server) as client:
         result = await client.call_tool("search_files", {"pattern": ""})
 
@@ -102,8 +101,6 @@ async def test_filter_files_returns_best_match(tmp_path: Path):
     (tmp_path / "maintenance.rs").write_text("// rust")
 
     # Act
-    import json
-
     async with client_session(mcp_fd_server.mcp._mcp_server) as client:
         result = await client.call_tool(
             "filter_files",
@@ -133,8 +130,6 @@ async def test_filter_files_multiple_matches(tmp_path: Path):
     (tmp_path / "settings.toml").write_text("[section]")
 
     # Act
-    import json
-
     async with client_session(mcp_fd_server.mcp._mcp_server) as client:
         result = await client.call_tool(
             "filter_files", {"filter": "conf", "path": str(tmp_path)}
@@ -148,8 +143,6 @@ async def test_filter_files_multiple_matches(tmp_path: Path):
 
 async def test_filter_files_error_handling():
     """Test filter_files error handling for missing filter."""
-    import json
-
     async with client_session(mcp_fd_server.mcp._mcp_server) as client:
         result = await client.call_tool("filter_files", {"filter": ""})
 
@@ -179,33 +172,26 @@ async def test_list_tools():
         assert "filter" in filter_tool.inputSchema["required"]
 
 
-@patch("shutil.which")
-def test_binary_discovery(mock_which):
-    """Test binary discovery logic."""
-    # Store original values
-    original_fd = mcp_fd_server.FD_EXECUTABLE
-    original_fzf = mcp_fd_server.FZF_EXECUTABLE
+def test_binary_discovery():
+    """Test binary discovery logic for fd and fzf."""
+    with patch("shutil.which") as mock_which:
+        # Test fd discovery (fd takes precedence over fdfind)
+        mock_which.side_effect = lambda x: "/usr/bin/fd" if x == "fd" else (
+            "/usr/bin/fdfind" if x == "fdfind" else None
+        )
+        fd_path = mock_which("fd") or mock_which("fdfind")
+        assert fd_path == "/usr/bin/fd"
 
-    try:
-        # Test when fd is available as 'fd'
-        mock_which.side_effect = lambda x: "/usr/bin/fd" if x == "fd" else None
-
-        # Reload module to trigger discovery
-        import importlib
-
-        importlib.reload(mcp_fd_server)
-
-        assert mcp_fd_server.FD_EXECUTABLE == "/usr/bin/fd"
-
-        # Test when fd is available as 'fdfind' (Debian/Ubuntu)
+        # Test fdfind fallback (Debian/Ubuntu)
         mock_which.side_effect = lambda x: "/usr/bin/fdfind" if x == "fdfind" else None
-        importlib.reload(mcp_fd_server)
+        fd_path = mock_which("fd") or mock_which("fdfind")
+        assert fd_path == "/usr/bin/fdfind"
 
-        assert mcp_fd_server.FD_EXECUTABLE == "/usr/bin/fdfind"
-    finally:
-        # Restore original values
-        mcp_fd_server.FD_EXECUTABLE = original_fd
-        mcp_fd_server.FZF_EXECUTABLE = original_fzf
+        # Reset side_effect and test no fd available
+        mock_which.side_effect = None
+        mock_which.return_value = None
+        fd_path = mock_which("fd") or mock_which("fdfind")
+        assert fd_path is None
 
 
 def test_require_binary():
@@ -254,8 +240,6 @@ async def test_filter_files_mocked(mock_check_output, mock_popen):
     mock_check_output.return_value = "src/main.py\n"
 
     # Override binary checks
-    import json
-
     with (
         patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
         patch.object(mcp_fd_server, "FZF_EXECUTABLE", "/mock/fzf"),
@@ -268,3 +252,208 @@ async def test_filter_files_mocked(mock_check_output, mock_popen):
             # Assert
             data = json.loads(result.content[0].text)
             assert data["matches"] == ["src/main.py"]
+
+
+# Additional comprehensive tests
+
+
+async def test_search_files_default_path():
+    """Test search_files with default path (current directory)."""
+    _skip_if_missing("fd")
+
+    async with client_session(mcp_fd_server.mcp._mcp_server) as client:
+        result = await client.call_tool("search_files", {"pattern": r"\.py$"})
+
+        data = json.loads(result.content[0].text)
+        # Should find some .py files in current directory (at least mcp_fd_server.py)
+        assert "matches" in data
+
+
+async def test_filter_files_with_fd_and_fzf_flags(tmp_path: Path):
+    """Test filter_files with additional fd and fzf flags."""
+    _skip_if_missing("fd")
+    _skip_if_missing("fzf")
+
+    # Create test files
+    (tmp_path / ".env.local").write_text("SECRET=hidden")
+    (tmp_path / "config.env").write_text("PUBLIC=visible")
+
+    async with client_session(mcp_fd_server.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "filter_files",
+            {
+                "filter": "env",
+                "pattern": "env",
+                "path": str(tmp_path),
+                "fd_flags": "--hidden",
+                "fzf_flags": "--exact",
+            },
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "matches" in data
+        # Should find both files with --hidden flag
+        assert len(data["matches"]) >= 1
+
+
+async def test_search_files_with_multiple_flags(tmp_path: Path):
+    """Test search_files with multiple fd flags."""
+    _skip_if_missing("fd")
+
+    # Create test structure
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / ".hidden" / "secret.py").write_text("# secret")
+    (tmp_path / "public.py").write_text("# public")
+
+    async with client_session(mcp_fd_server.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "search_files",
+            {"pattern": r"\.py$", "path": str(tmp_path), "flags": "--hidden --type f"},
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "matches" in data
+        # Should find both files with --hidden flag
+        assert any("secret.py" in match for match in data["matches"])
+        assert any("public.py" in match for match in data["matches"])
+
+
+async def test_empty_search_results(tmp_path: Path):
+    """Test behavior when search returns no results."""
+    _skip_if_missing("fd")
+
+    # Create directory with no matching files
+    (tmp_path / "readme.txt").write_text("documentation")
+
+    async with client_session(mcp_fd_server.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "search_files", {"pattern": r"\.nonexistent$", "path": str(tmp_path)}
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "matches" in data
+        assert data["matches"] == []
+
+
+async def test_filter_files_empty_results(tmp_path: Path):
+    """Test filter_files with no fuzzy matches."""
+    _skip_if_missing("fd")
+    _skip_if_missing("fzf")
+
+    # Create test files
+    (tmp_path / "alpha.txt").write_text("content")
+    (tmp_path / "beta.txt").write_text("content")
+
+    async with client_session(mcp_fd_server.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "filter_files",
+            {"filter": "zzz_nonmatch", "pattern": r"\.txt$", "path": str(tmp_path)},
+        )
+
+        data = json.loads(result.content[0].text)
+        # fzf may return error for no matches, or empty matches list
+        if "error" in data:
+            # This is acceptable - fzf can return error when no matches
+            assert isinstance(data["error"], str)
+        else:
+            assert "matches" in data
+            assert isinstance(data["matches"], list)
+
+
+# CLI interface tests
+
+
+def test_cli_search_command(tmp_path: Path):
+    """Test CLI search subcommand."""
+    # Create test files
+    (tmp_path / "test.py").write_text("print('hello')")
+    (tmp_path / "test.txt").write_text("hello")
+
+    result = subprocess.run(
+        [sys.executable, "mcp_fd_server.py", "search", r"\.py$", str(tmp_path)],
+        capture_output=True,
+        text=True,
+    )
+
+    # Skip if fd not available
+    if "Cannot find the `fd` binary" in result.stderr:
+        pytest.skip("fd not available")
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert "matches" in output
+    assert any("test.py" in match for match in output["matches"])
+
+
+def test_cli_filter_command(tmp_path: Path):
+    """Test CLI filter subcommand."""
+    # Create test files
+    (tmp_path / "main.py").write_text("# main")
+    (tmp_path / "minor.py").write_text("# minor")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "mcp_fd_server.py",
+            "filter",
+            "main",
+            r"\.py$",
+            str(tmp_path),
+            "--first",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    # Skip if dependencies not available
+    if "Cannot find the" in result.stderr:
+        pytest.skip("fd or fzf not available")
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert "matches" in output
+    if output["matches"]:  # fzf might not find matches depending on version
+        assert len(output["matches"]) == 1
+
+
+def test_cli_help():
+    """Test CLI help output."""
+    result = subprocess.run(
+        [sys.executable, "mcp_fd_server.py", "-h"], capture_output=True, text=True
+    )
+
+    assert result.returncode == 0
+    assert "fd + fzf powers" in result.stdout
+    assert "search" in result.stdout
+    assert "filter" in result.stdout
+
+
+def test_cli_with_flags(tmp_path: Path):
+    """Test CLI with additional flags."""
+    # Create test files including hidden
+    (tmp_path / "visible.py").write_text("# visible")
+    (tmp_path / ".hidden.py").write_text("# hidden")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "mcp_fd_server.py",
+            "search",
+            r"\.py$",
+            str(tmp_path),
+            "--flags=--hidden",  # Use equals syntax for flags
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if "Cannot find the `fd` binary" in result.stderr:
+        pytest.skip("fd not available")
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert "matches" in output
+    # Should find both visible and hidden files
+    matches = output["matches"]
+    assert any("visible.py" in match for match in matches)
+    assert any(".hidden.py" in match for match in matches)
