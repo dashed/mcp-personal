@@ -109,6 +109,71 @@ uv sync --dev
 make setup
 ```
 
+## Testing and Development
+
+### MCP Inspector
+
+The **MCP Inspector** is an interactive developer tool for testing and debugging MCP servers. It provides a web-based interface that allows you to:
+
+- **Visually test your MCP servers** with an interactive UI
+- **Debug server implementations** by examining request/response flows
+- **Test tools, resources, and prompts** with different arguments
+- **Validate server behavior** before deployment
+
+#### Quick Testing
+
+Test any MCP server using the inspector:
+
+```bash
+# Test the file search server
+npx @modelcontextprotocol/inspector ./mcp_fd_server.py
+
+# Test the fuzzy search server  
+npx @modelcontextprotocol/inspector ./mcp_fuzzy_search.py
+```
+
+This will:
+1. Start the MCP Inspector proxy server (default port 6277)
+2. Launch a web interface (default port 6274) 
+3. Connect to your MCP server via stdio transport
+4. Open your browser to the inspector interface
+
+#### Using the Inspector
+
+Once the inspector is running:
+
+1. **Navigate to the web interface** (usually http://localhost:6274)
+2. **Explore the tabs**:
+   - **Tools**: Test `search_files`, `filter_files`, `fuzzy_search_files`, `fuzzy_search_content`
+   - **Resources**: View any exposed resources (if implemented)
+   - **Prompts**: Test any exposed prompts (if implemented)
+3. **Test different scenarios**:
+   - Try various search patterns and filters
+   - Test multiline functionality
+   - Experiment with different file paths and flags
+   - Validate error handling with invalid inputs
+
+#### Advanced Configuration
+
+You can also use configuration files for complex setups:
+
+```bash
+# Using a config file
+npx @modelcontextprotocol/inspector --config config.json
+
+# Passing environment variables
+npx @modelcontextprotocol/inspector -e "DEBUG=1" ./mcp_fuzzy_search.py
+
+# Custom ports
+npx @modelcontextprotocol/inspector --mcpp-port 3001 --mcpi-port 3002 ./mcp_fd_server.py
+```
+
+The MCP Inspector is particularly valuable for:
+- **Rapid prototyping** - quickly test new functionality
+- **Debugging** - identify issues before integration with Claude
+- **Documentation** - understand exactly what your server exposes
+- **Validation** - ensure proper error handling and edge cases
+
 ## Usage
 
 ### File Search Server
