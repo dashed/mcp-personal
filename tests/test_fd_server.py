@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -461,9 +462,6 @@ def test_cli_with_flags(tmp_path: Path):
 
 # Additional mock-based tests that don't require real binaries
 
-import os
-
-
 monkeypatch = pytest.MonkeyPatch()
 
 
@@ -477,7 +475,7 @@ print("file2.log")
 sys.exit(0)
 ''')
     mock_fd.chmod(0o755)
-    
+
     mock_fzf = tmp_path / "fzf"
     mock_fzf.write_text('''#!/usr/bin/env python3
 import sys
@@ -485,16 +483,16 @@ import sys
 sys.exit(1)
 ''')
     mock_fzf.chmod(0o755)
-    
+
     with monkeypatch.context() as m:
         m.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
-        
+
         # Reload module globals to pick up new executables
         mcp_fd_server.FD_EXECUTABLE = shutil.which("fd") or shutil.which("fdfind")
         mcp_fd_server.FZF_EXECUTABLE = shutil.which("fzf")
-        
+
         result = mcp_fd_server.filter_files("nomatch")
-        
+
         # Should handle empty results gracefully
         assert "error" in result
 
@@ -504,10 +502,10 @@ def test_multiline_support(tmp_path: Path):
     # Create test files with content
     test_file1 = tmp_path / "test1.txt"
     test_file1.write_text("line 1\nline 2\nfunction foo() {\n  return bar;\n}")
-    
+
     test_file2 = tmp_path / "test2.py"
     test_file2.write_text("import os\ndef main():\n    print('hello')")
-    
+
     mock_fd = tmp_path / "fd"
     mock_fd.write_text(f'''#!/usr/bin/env python3
 import sys
@@ -515,7 +513,7 @@ print("{test_file1}")
 print("{test_file2}")
 ''')
     mock_fd.chmod(0o755)
-    
+
     mock_fzf = tmp_path / "fzf"
     mock_fzf.write_text(f'''#!/usr/bin/env python3
 import sys
@@ -529,16 +527,16 @@ if "--read0" in sys.argv and "--print0" in sys.argv:
         print(content, end="\\0")
 ''')
     mock_fzf.chmod(0o755)
-    
+
     with monkeypatch.context() as m:
         m.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
-        
+
         # Reload module globals to pick up new executables
         mcp_fd_server.FD_EXECUTABLE = shutil.which("fd") or shutil.which("fdfind")
         mcp_fd_server.FZF_EXECUTABLE = shutil.which("fzf")
-        
+
         result = mcp_fd_server.filter_files("function", multiline=True)
-        
+
         assert "matches" in result
         matches = result["matches"]
         assert len(matches) > 0
@@ -549,10 +547,10 @@ def test_multiline_cli_support():
     """Test CLI support for multiline flag."""
     with patch('mcp_fd_server.filter_files') as mock_filter:
         mock_filter.return_value = {"matches": ["file1.txt"]}
-        
+
         with patch('sys.argv', ['mcp_fd_server.py', 'filter', 'test', '', '.', '--multiline']):
             mcp_fd_server._cli()
-            
+
         # Verify multiline=True was passed as a positional argument
         mock_filter.assert_called_once()
         call_args = mock_filter.call_args
@@ -568,10 +566,10 @@ def test_multiline_cli_support():
 async def test_filter_files_multiline_mcp():
     """Test multiline support through MCP interface."""
     test_content = "function example() {\n  return 'hello';\n}"
-    
+
     with patch('builtins.open', create=True) as mock_open:
         mock_open.return_value.__enter__.return_value.read.return_value = test_content.encode()
-        
+
         with (
             patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
             patch.object(mcp_fd_server, "FZF_EXECUTABLE", "/mock/fzf"),
@@ -580,18 +578,18 @@ async def test_filter_files_multiline_mcp():
         ):
             # Mock fd listing files
             mock_fd_output.return_value = "test.js\n"
-            
+
             # Mock fzf finding the function
             mock_fzf_proc = MagicMock()
             mock_fzf_proc.communicate.return_value = (b"test.js:\nfunction example() {\n  return 'hello';\n}\x00", b"")
             mock_popen.return_value = mock_fzf_proc
-            
+
             async with client_session(mcp_fd_server.mcp._mcp_server) as client:
                 result = await client.call_tool(
-                    "filter_files", 
+                    "filter_files",
                     {"filter": "function", "multiline": True}
                 )
-                
+
                 data = json.loads(result.content[0].text)
                 assert "matches" in data
                 assert len(data["matches"]) > 0

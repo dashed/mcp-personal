@@ -143,11 +143,11 @@ def fuzzy_search_files(
             if hidden:
                 rg_list_cmd.append("--hidden")
             rg_list_cmd.append(path)
-            
+
             # Get file list
             file_list_result = subprocess.check_output(rg_list_cmd, text=True)
             file_paths = [p for p in file_list_result.splitlines() if p]
-            
+
             # Build multiline input with null separators
             multiline_input = b""
             for file_path in file_paths:
@@ -155,22 +155,22 @@ def fuzzy_search_files(
                     with open(file_path, 'rb') as f:
                         content = f.read()
                         # Create record: filename: + content + null separator
-                        record = f"{file_path}:\n".encode('utf-8') + content + b'\0'
+                        record = f"{file_path}:\n".encode() + content + b'\0'
                         multiline_input += record
-                except (IOError, OSError, UnicodeDecodeError):
+                except (OSError, UnicodeDecodeError):
                     continue  # Skip files that can't be read
-            
+
             if not multiline_input:
                 return {"matches": []}
-            
+
             # Use fzf with multiline support
             fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
-            
+
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
             )
             out_bytes, _ = fzf_proc.communicate(multiline_input)
-            
+
             # Parse null-separated output
             matches = []
             if out_bytes:
@@ -297,11 +297,11 @@ def fuzzy_search_content(
                         safe_flags.append(flag)
                 rg_list_cmd.extend(safe_flags)
             rg_list_cmd.append(path)
-            
+
             # Get file list
             file_list_result = subprocess.check_output(rg_list_cmd, text=True)
             file_paths = [p for p in file_list_result.splitlines() if p]
-            
+
             # Build multiline input with file contents
             multiline_input = b""
             for file_path in file_paths:
@@ -319,24 +319,24 @@ def fuzzy_search_content(
                                 # If pattern is invalid regex, treat as literal
                                 if pattern.encode('utf-8') not in content:
                                     continue
-                        
+
                         # Create record: filename + content + null separator
-                        record = f"{file_path}:\n".encode('utf-8') + content + b'\0'
+                        record = f"{file_path}:\n".encode() + content + b'\0'
                         multiline_input += record
-                except (IOError, OSError, UnicodeDecodeError):
+                except (OSError, UnicodeDecodeError):
                     continue
-            
+
             if not multiline_input:
                 return {"matches": []}
-            
+
             # Use fzf with multiline support
             fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
-            
+
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
             )
             out_bytes, _ = fzf_proc.communicate(multiline_input)
-            
+
             # Parse multiline results - return as file records
             matches = []
             if out_bytes:

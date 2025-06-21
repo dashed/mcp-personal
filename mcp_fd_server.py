@@ -171,12 +171,12 @@ def filter_files(
     if multiline:
         # For multiline mode, find files first, then read contents with null separators
         fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, path]
-        
+
         try:
             # Get file list from fd
             fd_result = subprocess.check_output(fd_cmd, text=True)
             file_paths = [p for p in fd_result.splitlines() if p]
-            
+
             # Read file contents with null separators
             multiline_input = b""
             for file_path in file_paths:
@@ -184,23 +184,23 @@ def filter_files(
                     with open(file_path, 'rb') as f:
                         content = f.read()
                         # Add filename prefix and null separator
-                        record = f"{file_path}:\n".encode('utf-8') + content + b'\0'
+                        record = f"{file_path}:\n".encode() + content + b'\0'
                         multiline_input += record
-                except (IOError, OSError):
+                except OSError:
                     continue  # Skip files that can't be read
-            
+
             if not multiline_input:
                 return {"matches": []}
-            
+
             # Use fzf with multiline support
             fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
             fzf_cmd.extend(shlex.split(fzf_flags))
-            
+
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
             )
             out_bytes, _ = fzf_proc.communicate(multiline_input)
-            
+
             # Parse null-separated output
             matches = []
             if out_bytes:
@@ -210,7 +210,7 @@ def filter_files(
                             matches.append(chunk.decode('utf-8'))
                         except UnicodeDecodeError:
                             matches.append(chunk.decode('utf-8', errors='replace'))
-            
+
         except subprocess.CalledProcessError as exc:
             return {"error": str(exc)}
     else:

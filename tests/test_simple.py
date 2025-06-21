@@ -7,23 +7,21 @@ import pytest
 import mcp_fd_server
 
 
-def test_search_files_direct():
-    """Test search_files function directly."""
-    # Skip if fd not available
-    if not mcp_fd_server.FD_EXECUTABLE:
-        pytest.skip("fd not available")
+@patch("subprocess.check_output")
+def test_search_files_direct(mock_check_output):
+    """Test search_files function with reliable mocked output."""
+    mock_check_output.return_value = "mcp_fd_server.py\nmcp_fuzzy_search.py\n"
 
-    # Use current directory for simple test
-    result = mcp_fd_server.search_files(pattern=r"\.py$", path=".")
+    with patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"):
+        result = mcp_fd_server.search_files(pattern=r"\.py$", path=".")
 
     # Should return a dict with matches key
     assert isinstance(result, dict)
-    assert "matches" in result or "error" in result
-
-    if "matches" in result:
-        assert isinstance(result["matches"], list)
-        # Should find at least mcp_fd_server.py itself
-        assert any("mcp_fd_server.py" in match for match in result["matches"])
+    assert "matches" in result
+    assert isinstance(result["matches"], list)
+    assert len(result["matches"]) == 2
+    assert "mcp_fd_server.py" in result["matches"]
+    assert "mcp_fuzzy_search.py" in result["matches"]
 
 
 def test_search_files_error():
@@ -72,18 +70,22 @@ def test_binary_missing_exception():
     assert "Cannot find the `test-binary` binary" in str(exc_info.value)
 
 
-def test_cli_functionality(tmp_path):
-    """Test CLI helper functionality."""
-    # Create test file
-    test_file = tmp_path / "test.py"
+@patch("subprocess.check_output")
+def test_cli_functionality(mock_check_output, tmp_path):
+    """Test CLI helper functionality with mocked output."""
+    # Create test file for reference
+    test_dir = tmp_path / "isolated_test"
+    test_dir.mkdir()
+    test_file = test_dir / "test.py"
     test_file.write_text("print('hello')")
 
-    # Skip if fd not available
-    if not mcp_fd_server.FD_EXECUTABLE:
-        pytest.skip("fd not available")
+    # Mock fd output to return our test file
+    mock_check_output.return_value = f"{test_file}\n"
 
-    # Test search functionality
-    result = mcp_fd_server.search_files(pattern=r"\.py$", path=str(tmp_path))
+    with patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"):
+        result = mcp_fd_server.search_files(pattern=r"\.py$", path=str(test_dir))
 
     assert "matches" in result
-    assert str(test_file) in result["matches"]
+    matches = result["matches"]
+    assert len(matches) == 1
+    assert str(test_file) in matches[0]
