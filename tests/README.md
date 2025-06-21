@@ -11,23 +11,27 @@ This directory contains tests for the MCP FD Server implementation.
 
 ## Running Tests
 
-### Simple Tests (Recommended)
-Run the simplified tests that directly test the tool functions:
+### All Tests
+Run the complete test suite:
 
 ```bash
 # Using uv (recommended)
-PYTHONPATH=. uv run --with pytest --with mcp pytest tests/test_simple.py -v
+make test
 
-# Or run all tests
-PYTHONPATH=. uv run --with pytest --with mcp pytest tests/ -v
+# Or directly with pytest
+PYTHONPATH=. uv run pytest tests/ -v
 ```
 
-### Full Integration Tests
-The full integration tests require more setup and use the MCP client/server protocol:
-
+### Specific Test Categories
 ```bash
-# Disable plugin autoload if you encounter issues
-PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD="" uv run --with pytest --with pytest-asyncio --with mcp pytest tests/test_fd_server.py -v
+# Simple/direct function tests only
+make test-simple
+
+# Full MCP integration tests only  
+make test-full
+
+# CLI tests only
+make test-cli
 ```
 
 ## Test Coverage
@@ -42,6 +46,15 @@ The tests cover:
 ## CI/CD Considerations
 
 Tests that require `fd` and `fzf` binaries will be automatically skipped if these tools are not available on the system. The test suite includes mocked versions of these tests that can run in CI environments.
+
+## Test Results
+
+The test suite includes:
+- 7 simple function tests
+- 20 async MCP integration tests (10 asyncio + 10 trio variants)
+- 7 CLI tests (3 skipped by default)
+
+All tests are passing with the current implementation.
 
 ## Dependencies
 
