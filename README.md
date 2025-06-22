@@ -88,8 +88,12 @@ claude mcp add sequential-thinking -s user -- npx -y @modelcontextprotocol/serve
 # IMPORTANT: Use -s user for personal tools you want available across all projects
 # Without -s flag, servers are only available in current directory and are temporary
 
-# Using relative paths (when in the project directory)
+# Easy method: Use $(pwd) when in the project directory
 cd /path/to/mcp-personal
+claude mcp add file-search -s user -- $(pwd)/mcp_fd_server.py
+claude mcp add fuzzy-search -s user -- $(pwd)/mcp_fuzzy_search.py
+
+# Or use relative paths (also from project directory)
 claude mcp add file-search -s user -- ./mcp_fd_server.py
 claude mcp add fuzzy-search -s user -- ./mcp_fuzzy_search.py
 
