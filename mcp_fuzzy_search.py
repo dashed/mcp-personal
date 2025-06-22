@@ -226,7 +226,9 @@ def fuzzy_search_files(
                 for chunk in out_bytes.split(b"\0"):
                     if chunk:
                         try:
-                            matches.append(chunk.decode("utf-8"))
+                            decoded = chunk.decode("utf-8")
+                            # In multiline mode, return the full content including filename prefix
+                            matches.append(decoded)
                         except UnicodeDecodeError:
                             matches.append(chunk.decode("utf-8", errors="replace"))
         else:

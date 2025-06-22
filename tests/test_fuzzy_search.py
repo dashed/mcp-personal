@@ -571,9 +571,23 @@ async def test_fuzzy_search_files_multiline_mcp():
     """Test multiline support through MCP interface for fuzzy_search_files."""
     test_content = "async function processData() {\n  const result = await fetch('/api');\n  return result.json();\n}"
 
-    with patch("builtins.open", create=True) as mock_open:
-        mock_open.return_value.__enter__.return_value.read.return_value = (
-            test_content.encode()
+    # Create a mock file object
+    mock_file = MagicMock()
+    mock_file.read.return_value = test_content.encode()
+
+    # We need to patch Path at the module level
+    with patch("mcp_fuzzy_search.Path") as mock_path_class:
+        # Create a mock Path instance
+        mock_path_instance = MagicMock()
+        mock_path_instance.open.return_value.__enter__.return_value = mock_file
+
+        # Path() constructor returns our mock instance
+        mock_path_class.return_value = mock_path_instance
+
+        # For Path(path).resolve() calls
+        mock_path_class.return_value.resolve.return_value = mock_path_instance
+        mock_path_class.return_value.resolve.return_value.__str__.return_value = (
+            "api.js"
         )
 
         with (
@@ -608,9 +622,23 @@ async def test_fuzzy_search_content_multiline_mcp():
     """Test multiline support through MCP interface for fuzzy_search_content."""
     test_content = "class DatabaseService {\n  constructor(config) {\n    this.config = config;\n  }\n\n  async connect() {\n    // TODO: implement\n  }\n}"
 
-    with patch("builtins.open", create=True) as mock_open:
-        mock_open.return_value.__enter__.return_value.read.return_value = (
-            test_content.encode()
+    # Create a mock file object
+    mock_file = MagicMock()
+    mock_file.read.return_value = test_content.encode()
+
+    # We need to patch Path at the module level
+    with patch("mcp_fuzzy_search.Path") as mock_path_class:
+        # Create a mock Path instance
+        mock_path_instance = MagicMock()
+        mock_path_instance.open.return_value.__enter__.return_value = mock_file
+
+        # Path() constructor returns our mock instance
+        mock_path_class.return_value = mock_path_instance
+
+        # For Path(path).resolve() calls
+        mock_path_class.return_value.resolve.return_value = mock_path_instance
+        mock_path_class.return_value.resolve.return_value.__str__.return_value = (
+            "service.js"
         )
 
         with (
