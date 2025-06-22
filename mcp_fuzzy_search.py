@@ -69,8 +69,9 @@ IS_WINDOWS = platform.system() == "Windows"
 
 def _normalize_path(path: str) -> str:
     """Normalize path to use forward slashes consistently across platforms."""
-    # Use pathlib for proper path handling
-    return Path(path).as_posix()
+    # Replace backslashes with forward slashes for cross-platform consistency
+    # This handles Windows paths even when running on Unix systems
+    return path.replace("\\", "/")
 
 
 def _parse_ripgrep_line(line: str) -> tuple[str, int, str] | None:

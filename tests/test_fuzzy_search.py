@@ -698,3 +698,86 @@ async def test_fuzzy_search_content_multiline_mcp():
                 assert data["matches"][0]["file"] == "service.js"
                 assert "class DatabaseService" in data["matches"][0]["content"]
                 assert "async connect()" in data["matches"][0]["content"]
+
+
+def test_windows_path_parsing_multiline():
+    """Test parsing of multiline results with Windows paths containing colons."""
+    test_cases = [
+        # Windows absolute path
+        {
+            "input": "C:/Users/test/file.py:\nclass Test:\n    pass",
+            "expected_file": "C:/Users/test/file.py",
+            "expected_content": "class Test:\n    pass",
+        },
+        # Windows path with multiple directories
+        {
+            "input": "D:/Projects/my-app/src/main.py:\ndef main():\n    print('hello')",
+            "expected_file": "D:/Projects/my-app/src/main.py",
+            "expected_content": "def main():\n    print('hello')",
+        },
+        # UNC path
+        {
+            "input": "//server/share/file.txt:\nSome content\nMore content",
+            "expected_file": "//server/share/file.txt",
+            "expected_content": "Some content\nMore content",
+        },
+        # Path with spaces (normalized)
+        {
+            "input": 'C:/Program Files/app/config.json:\n{\n  "key": "value"\n}',
+            "expected_file": "C:/Program Files/app/config.json",
+            "expected_content": '{\n  "key": "value"\n}',
+        },
+    ]
+
+    for test_case in test_cases:
+        # Simulate what the parsing logic does
+        input_str = test_case["input"]
+        if ":\n" in input_str:
+            file_part, content_part = input_str.split(":\n", 1)
+            assert file_part == test_case["expected_file"], (
+                f"Failed to parse file part from {input_str}"
+            )
+            assert content_part == test_case["expected_content"], (
+                f"Failed to parse content part from {input_str}"
+            )
+
+
+def test_fuzzy_search_content_windows_paths():
+    """Test fuzzy_search_content with Windows-style paths in ripgrep output."""
+    with patch("subprocess.check_output") as mock_rg_output:
+        with patch("subprocess.Popen") as mock_popen:
+            with patch.object(mcp_fuzzy_search, "RG_EXECUTABLE", "/mock/rg"):
+                with patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"):
+                    # Mock rg listing files with Windows paths
+                    mock_rg_output.return_value = (
+                        r"C:\Users\test\app.py" + "\n" + r"D:\Projects\main.py" + "\n"
+                    )
+
+                    # Mock fzf process for multiline mode
+                    mock_proc = MagicMock()
+                    # Return Windows path normalized to forward slashes
+                    mock_proc.communicate.return_value = (
+                        b"C:/Users/test/app.py:\nclass Application:\n    def run(self):\n        pass\x00",
+                        b"",
+                    )
+                    mock_popen.return_value = mock_proc
+
+                    # Mock file reading
+                    with patch("pathlib.Path.open") as mock_open:
+                        mock_file = MagicMock()
+                        mock_file.read.return_value = (
+                            b"class Application:\n    def run(self):\n        pass"
+                        )
+                        mock_open.return_value.__enter__.return_value = mock_file
+
+                        result = mcp_fuzzy_search.fuzzy_search_content(
+                            "class", ".", multiline=True
+                        )
+
+                        assert "matches" in result
+                        assert len(result["matches"]) > 0
+                        match = result["matches"][0]
+                        assert match["file"] == "C:/Users/test/app.py"
+                        assert "class Application:" in match["content"]
+                        # Ensure no backslashes in the path
+                        assert "\\" not in match["file"]

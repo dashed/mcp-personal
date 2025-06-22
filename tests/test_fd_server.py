@@ -635,3 +635,48 @@ async def test_filter_files_multiline_mcp():
                 assert "matches" in data
                 assert len(data["matches"]) > 0
                 assert "function example()" in data["matches"][0]
+
+
+def test_windows_path_normalization():
+    """Test that Windows paths are properly normalized to forward slashes."""
+    # Test various Windows path formats
+    test_cases = [
+        (r"C:\Users\test\file.py", "C:/Users/test/file.py"),
+        (r"D:\Projects\my-app\src\main.py", "D:/Projects/my-app/src/main.py"),
+        (r"\\network\share\file.txt", "//network/share/file.txt"),
+        (r"C:" + "\\", "C:/"),
+        (r"relative\path\file.py", "relative/path/file.py"),
+    ]
+
+    for windows_path, expected in test_cases:
+        result = mcp_fd_server._normalize_path(windows_path)
+        assert result == expected, f"Failed to normalize {windows_path}"
+
+
+def test_search_files_windows_path_output():
+    """Test that search_files normalizes Windows paths in subprocess output."""
+    with patch("subprocess.check_output") as mock_check_output:
+        # Mock fd returning Windows-style paths
+        mock_check_output.return_value = (
+            r"C:\Users\test\file1.py"
+            + "\n"
+            + r"D:\Projects\app\main.py"
+            + "\n"
+            + r"\\network\share\script.py"
+            + "\n"
+        )
+
+        with patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"):
+            result = mcp_fd_server.search_files("*.py", ".")
+
+            assert "matches" in result
+            assert len(result["matches"]) == 3
+
+            # All paths should be normalized to forward slashes
+            assert result["matches"][0] == "C:/Users/test/file1.py"
+            assert result["matches"][1] == "D:/Projects/app/main.py"
+            assert result["matches"][2] == "//network/share/script.py"
+
+            # No backslashes should remain
+            for match in result["matches"]:
+                assert "\\" not in match
