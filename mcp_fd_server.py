@@ -181,7 +181,7 @@ def filter_files(
 
     fd_bin = _require(FD_EXECUTABLE, "fd")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
-    
+
     # Ensure path is properly formatted
     search_path = str(Path(path).resolve())
 

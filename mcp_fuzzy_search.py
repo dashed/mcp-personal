@@ -75,19 +75,19 @@ def _normalize_path(path: str) -> str:
 
 def _parse_ripgrep_line(line: str) -> tuple[str, int, str] | None:
     """Parse a ripgrep output line, handling Windows paths correctly.
-    
+
     Returns (file_path, line_number, content) or None if parsing fails.
     """
     if not line:
         return None
-    
+
     # On Windows, check if line starts with a drive letter (e.g., C:\)
-    if IS_WINDOWS and len(line) >= 3 and line[1] == ':' and line[0].isalpha():
+    if IS_WINDOWS and len(line) >= 3 and line[1] == ":" and line[0].isalpha():
         # Windows path format: C:\path\file.py:10:content
-        parts = line.split(':', 3)
+        parts = line.split(":", 3)
         if len(parts) >= 4:
             try:
-                file_path = parts[0] + ':' + parts[1]  # C:\path\file.py
+                file_path = parts[0] + ":" + parts[1]  # C:\path\file.py
                 line_num = int(parts[2])
                 content = parts[3] if len(parts) > 3 else ""
                 return (_normalize_path(file_path), line_num, content.strip())
@@ -95,13 +95,13 @@ def _parse_ripgrep_line(line: str) -> tuple[str, int, str] | None:
                 return None
     else:
         # Unix path format: /path/file.py:10:content
-        parts = line.split(':', 2)
+        parts = line.split(":", 2)
         if len(parts) >= 3:
             try:
                 return (_normalize_path(parts[0]), int(parts[1]), parts[2].strip())
             except (ValueError, IndexError):
                 return None
-    
+
     return None
 
 
@@ -191,7 +191,9 @@ def fuzzy_search_files(
 
             # Get file list
             file_list_result = subprocess.check_output(rg_list_cmd, text=True)
-            file_paths = [str(Path(p).resolve()) for p in file_list_result.splitlines() if p]
+            file_paths = [
+                str(Path(p).resolve()) for p in file_list_result.splitlines() if p
+            ]
 
             # Build multiline input with null separators
             multiline_input = b""
@@ -359,7 +361,9 @@ def fuzzy_search_content(
 
             # Get file list
             file_list_result = subprocess.check_output(rg_list_cmd, text=True)
-            file_paths = [str(Path(p).resolve()) for p in file_list_result.splitlines() if p]
+            file_paths = [
+                str(Path(p).resolve()) for p in file_list_result.splitlines() if p
+            ]
 
             # Build multiline input with file contents
             multiline_input = b""
@@ -466,7 +470,7 @@ def fuzzy_search_content(
             for line in out.splitlines():
                 if not line:
                     continue
-                
+
                 # Use the helper function to parse ripgrep output
                 parsed = _parse_ripgrep_line(line)
                 if parsed:

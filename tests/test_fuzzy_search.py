@@ -19,6 +19,7 @@ def normalize_path(path):
     # Use pathlib for proper path handling
     return Path(path).as_posix()
 
+
 pytestmark = pytest.mark.anyio
 
 
