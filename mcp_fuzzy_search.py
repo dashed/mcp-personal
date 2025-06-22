@@ -415,8 +415,9 @@ def fuzzy_search_content(
                         try:
                             decoded = chunk.decode("utf-8")
                             # Extract filename from first line
-                            if ":" in decoded:
-                                file_part, content_part = decoded.split(":", 1)
+                            # Format is: filepath:\ncontent
+                            if ":\n" in decoded:
+                                file_part, content_part = decoded.split(":\n", 1)
                                 matches.append(
                                     {
                                         "file": file_part.strip(),
