@@ -76,7 +76,35 @@ cd mcp-personal
 
 ### Configure MCP Servers
 
-Each server can be configured independently in Claude Desktop. Add the desired servers to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+#### Using Claude Code CLI
+
+The easiest way to add MCP servers to Claude Code is using the CLI:
+
+```bash
+# Add published npm servers
+claude mcp add sequential_thinking npx @modelcontextprotocol/server-sequential-thinking
+
+# Add custom Python servers from this repository
+# First, make sure the script is executable
+chmod +x /path/to/mcp-personal/mcp_fd_server.py
+
+# Then add it to Claude Code
+claude mcp add file-search /path/to/mcp-personal/mcp_fd_server.py
+claude mcp add fuzzy-search /path/to/mcp-personal/mcp_fuzzy_search.py
+
+# Add Python servers with Python interpreter explicitly
+claude mcp add my-server python /path/to/my_mcp_server.py
+
+# Add servers with arguments
+claude mcp add my-server python /path/to/server.py --arg1 value1 --arg2 value2
+
+# Add servers with environment variables
+claude mcp add my-server --env API_KEY=your_key --env DEBUG=true python /path/to/server.py
+```
+
+#### Manual Configuration (Claude Desktop)
+
+For Claude Desktop, manually add servers to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {

@@ -181,10 +181,10 @@ def filter_files(
             multiline_input = b""
             for file_path in file_paths:
                 try:
-                    with open(file_path, 'rb') as f:
+                    with open(file_path, "rb") as f:
                         content = f.read()
                         # Add filename prefix and null separator
-                        record = f"{file_path}:\n".encode() + content + b'\0'
+                        record = f"{file_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except OSError:
                     continue  # Skip files that can't be read
@@ -204,12 +204,12 @@ def filter_files(
             # Parse null-separated output
             matches = []
             if out_bytes:
-                for chunk in out_bytes.split(b'\0'):
+                for chunk in out_bytes.split(b"\0"):
                     if chunk:
                         try:
-                            matches.append(chunk.decode('utf-8'))
+                            matches.append(chunk.decode("utf-8"))
                         except UnicodeDecodeError:
-                            matches.append(chunk.decode('utf-8', errors='replace'))
+                            matches.append(chunk.decode("utf-8", errors="replace"))
 
         except subprocess.CalledProcessError as exc:
             return {"error": str(exc)}
@@ -242,7 +242,7 @@ def filter_files(
 def _cli() -> None:
     parser = argparse.ArgumentParser(
         description="fd + fzf powers, CLI mode",
-        epilog="fzf query examples: 'config .json$', '^src py$ | js$', ''main.py'' !test'"
+        epilog="fzf query examples: 'config .json$', '^src py$ | js$', ''main.py'' !test'",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -254,13 +254,17 @@ def _cli() -> None:
 
     # filter_files sub‑command
     p_filter = sub.add_parser("filter", help="fd + fzf filter")
-    p_filter.add_argument("filter", help="fzf query (use quotes: 'config .json$ !test')")
+    p_filter.add_argument(
+        "filter", help="fzf query (use quotes: 'config .json$ !test')"
+    )
     p_filter.add_argument("pattern", nargs="?", default="")
     p_filter.add_argument("path", nargs="?", default=".")
     p_filter.add_argument("--first", action="store_true")
     p_filter.add_argument("--fd-flags", default="")
     p_filter.add_argument("--fzf-flags", default="")
-    p_filter.add_argument("--multiline", action="store_true", help="Enable multiline content search")
+    p_filter.add_argument(
+        "--multiline", action="store_true", help="Enable multiline content search"
+    )
 
     ns = parser.parse_args()
 
@@ -268,7 +272,13 @@ def _cli() -> None:
         res = search_files(ns.pattern, ns.path, ns.flags)
     else:
         res = filter_files(
-            ns.filter, ns.pattern, ns.path, ns.first, ns.fd_flags, ns.fzf_flags, ns.multiline
+            ns.filter,
+            ns.pattern,
+            ns.path,
+            ns.first,
+            ns.fd_flags,
+            ns.fzf_flags,
+            ns.multiline,
         )
 
     print(json.dumps(res, indent=2))

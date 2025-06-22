@@ -152,10 +152,10 @@ def fuzzy_search_files(
             multiline_input = b""
             for file_path in file_paths:
                 try:
-                    with open(file_path, 'rb') as f:
+                    with open(file_path, "rb") as f:
                         content = f.read()
                         # Create record: filename: + content + null separator
-                        record = f"{file_path}:\n".encode() + content + b'\0'
+                        record = f"{file_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except (OSError, UnicodeDecodeError):
                     continue  # Skip files that can't be read
@@ -174,12 +174,12 @@ def fuzzy_search_files(
             # Parse null-separated output
             matches = []
             if out_bytes:
-                for chunk in out_bytes.split(b'\0'):
+                for chunk in out_bytes.split(b"\0"):
                     if chunk:
                         try:
-                            matches.append(chunk.decode('utf-8'))
+                            matches.append(chunk.decode("utf-8"))
                         except UnicodeDecodeError:
-                            matches.append(chunk.decode('utf-8', errors='replace'))
+                            matches.append(chunk.decode("utf-8", errors="replace"))
         else:
             # Standard mode - file paths only
             rg_cmd: list[str] = [rg_bin, "--files"]
@@ -192,7 +192,9 @@ def fuzzy_search_files(
 
             logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
-            rg_proc = subprocess.Popen(rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            rg_proc = subprocess.Popen(
+                rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
             )
@@ -293,7 +295,13 @@ def fuzzy_search_content(
                 # Filter out options that don't apply to --files
                 safe_flags = []
                 for flag in shlex.split(rg_flags):
-                    if flag not in ["-n", "--line-number", "-H", "--with-filename", "--no-heading"]:
+                    if flag not in [
+                        "-n",
+                        "--line-number",
+                        "-H",
+                        "--with-filename",
+                        "--no-heading",
+                    ]:
                         safe_flags.append(flag)
                 rg_list_cmd.extend(safe_flags)
             rg_list_cmd.append(path)
@@ -306,22 +314,25 @@ def fuzzy_search_content(
             multiline_input = b""
             for file_path in file_paths:
                 try:
-                    with open(file_path, 'rb') as f:
+                    with open(file_path, "rb") as f:
                         content = f.read()
                         # Only include files that match the pattern if not default
                         if pattern != ".":
                             # Quick check if pattern matches in content
                             try:
                                 import re
-                                if not re.search(pattern.encode('utf-8'), content, re.IGNORECASE):
+
+                                if not re.search(
+                                    pattern.encode("utf-8"), content, re.IGNORECASE
+                                ):
                                     continue
                             except re.error:
                                 # If pattern is invalid regex, treat as literal
-                                if pattern.encode('utf-8') not in content:
+                                if pattern.encode("utf-8") not in content:
                                     continue
 
                         # Create record: filename + content + null separator
-                        record = f"{file_path}:\n".encode() + content + b'\0'
+                        record = f"{file_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except (OSError, UnicodeDecodeError):
                     continue
@@ -340,18 +351,22 @@ def fuzzy_search_content(
             # Parse multiline results - return as file records
             matches = []
             if out_bytes:
-                for chunk in out_bytes.split(b'\0'):
+                for chunk in out_bytes.split(b"\0"):
                     if chunk:
                         try:
-                            decoded = chunk.decode('utf-8')
+                            decoded = chunk.decode("utf-8")
                             # Extract filename from first line
-                            if ':' in decoded:
-                                file_part, content_part = decoded.split(':', 1)
-                                matches.append({
-                                    "file": file_part.strip(),
-                                    "line": 1,  # Multiline records don't have specific line numbers
-                                    "content": content_part.strip()[:200] + "..." if len(content_part) > 200 else content_part.strip()
-                                })
+                            if ":" in decoded:
+                                file_part, content_part = decoded.split(":", 1)
+                                matches.append(
+                                    {
+                                        "file": file_part.strip(),
+                                        "line": 1,  # Multiline records don't have specific line numbers
+                                        "content": content_part.strip()[:200] + "..."
+                                        if len(content_part) > 200
+                                        else content_part.strip(),
+                                    }
+                                )
                         except UnicodeDecodeError:
                             continue
         else:
@@ -373,7 +388,9 @@ def fuzzy_search_content(
 
             logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
-            rg_proc = subprocess.Popen(rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            rg_proc = subprocess.Popen(
+                rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
             )
@@ -384,7 +401,10 @@ def fuzzy_search_content(
             rg_proc.wait()
 
             if rg_proc.returncode != 0 and rg_proc.returncode != 1:  # 1 = no matches
-                return {"error": rg_stderr.strip() or f"ripgrep failed with code {rg_proc.returncode}"}
+                return {
+                    "error": rg_stderr.strip()
+                    or f"ripgrep failed with code {rg_proc.returncode}"
+                }
 
             # Parse results
             matches = []
@@ -393,11 +413,13 @@ def fuzzy_search_content(
                     continue
                 parts = line.split(":", 2)
                 if len(parts) >= 3:
-                    matches.append({
-                        "file": parts[0],
-                        "line": int(parts[1]),
-                        "content": parts[2].strip(),
-                    })
+                    matches.append(
+                        {
+                            "file": parts[0],
+                            "line": int(parts[1]),
+                            "content": parts[2].strip(),
+                        }
+                    )
 
         # Apply limit
         matches = matches[:limit]
@@ -416,7 +438,7 @@ def fuzzy_search_content(
 def _cli() -> None:
     parser = argparse.ArgumentParser(
         description="Fuzzy search with ripgrep + fzf",
-        epilog="fzf syntax: 'term1 term2' (AND), 'a | b' (OR), '^start', 'end$', '!exclude'"
+        epilog="fzf syntax: 'term1 term2' (AND), 'a | b' (OR), '^start', 'end$', '!exclude'",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -426,17 +448,27 @@ def _cli() -> None:
     p_files.add_argument("path", nargs="?", default=".", help="Directory to search")
     p_files.add_argument("--hidden", action="store_true", help="Include hidden files")
     p_files.add_argument("--limit", type=int, default=20, help="Max results")
-    p_files.add_argument("--multiline", action="store_true", help="Search file contents (multiline)")
+    p_files.add_argument(
+        "--multiline", action="store_true", help="Search file contents (multiline)"
+    )
 
     # search-content subcommand
-    p_content = sub.add_parser("search-content", help="Search all content with fuzzy filter")
+    p_content = sub.add_parser(
+        "search-content", help="Search all content with fuzzy filter"
+    )
     p_content.add_argument("filter", help="fzf query: 'TODO implement .py: !test'")
-    p_content.add_argument("path", nargs="?", default=".", help="Directory/file to search")
-    p_content.add_argument("--pattern", default=".", help="Ripgrep pattern (default: all lines)")
+    p_content.add_argument(
+        "path", nargs="?", default=".", help="Directory/file to search"
+    )
+    p_content.add_argument(
+        "--pattern", default=".", help="Ripgrep pattern (default: all lines)"
+    )
     p_content.add_argument("--hidden", action="store_true", help="Search hidden files")
     p_content.add_argument("--limit", type=int, default=20, help="Max results")
     p_content.add_argument("--rg-flags", default="", help="rg flags: '-i -C 3 -t py'")
-    p_content.add_argument("--multiline", action="store_true", help="Multiline record processing")
+    p_content.add_argument(
+        "--multiline", action="store_true", help="Multiline record processing"
+    )
 
     ns = parser.parse_args()
 
@@ -444,7 +476,13 @@ def _cli() -> None:
         res = fuzzy_search_files(ns.filter, ns.path, ns.hidden, ns.limit, ns.multiline)
     else:
         res = fuzzy_search_content(
-            ns.filter, ns.path, ns.pattern, ns.hidden, ns.limit, ns.rg_flags, ns.multiline
+            ns.filter,
+            ns.path,
+            ns.pattern,
+            ns.hidden,
+            ns.limit,
+            ns.rg_flags,
+            ns.multiline,
         )
 
     print(json.dumps(res, indent=2))

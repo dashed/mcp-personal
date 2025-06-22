@@ -177,8 +177,10 @@ def test_binary_discovery():
     """Test binary discovery logic for fd and fzf."""
     with patch("shutil.which") as mock_which:
         # Test fd discovery (fd takes precedence over fdfind)
-        mock_which.side_effect = lambda x: "/usr/bin/fd" if x == "fd" else (
-            "/usr/bin/fdfind" if x == "fdfind" else None
+        mock_which.side_effect = (
+            lambda x: "/usr/bin/fd"
+            if x == "fd"
+            else ("/usr/bin/fdfind" if x == "fdfind" else None)
         )
         fd_path = mock_which("fd") or mock_which("fdfind")
         assert fd_path == "/usr/bin/fd"
@@ -468,20 +470,20 @@ monkeypatch = pytest.MonkeyPatch()
 def test_fd_flag_handling(tmp_path: Path):
     """Test that fzf exits with error code when no matches found."""
     mock_fd = tmp_path / "fd"
-    mock_fd.write_text('''#!/usr/bin/env python3
+    mock_fd.write_text("""#!/usr/bin/env python3
 import sys
 print("file1.txt")
 print("file2.log")
 sys.exit(0)
-''')
+""")
     mock_fd.chmod(0o755)
 
     mock_fzf = tmp_path / "fzf"
-    mock_fzf.write_text('''#!/usr/bin/env python3
+    mock_fzf.write_text("""#!/usr/bin/env python3
 import sys
 # fzf returns exit code 1 when no matches found
 sys.exit(1)
-''')
+""")
     mock_fzf.chmod(0o755)
 
     with monkeypatch.context() as m:
@@ -545,10 +547,12 @@ if "--read0" in sys.argv and "--print0" in sys.argv:
 
 def test_multiline_cli_support():
     """Test CLI support for multiline flag."""
-    with patch('mcp_fd_server.filter_files') as mock_filter:
+    with patch("mcp_fd_server.filter_files") as mock_filter:
         mock_filter.return_value = {"matches": ["file1.txt"]}
 
-        with patch('sys.argv', ['mcp_fd_server.py', 'filter', 'test', '', '.', '--multiline']):
+        with patch(
+            "sys.argv", ["mcp_fd_server.py", "filter", "test", "", ".", "--multiline"]
+        ):
             mcp_fd_server._cli()
 
         # Verify multiline=True was passed as a positional argument
@@ -560,34 +564,38 @@ def test_multiline_cli_support():
             assert call_args[0][6] is True  # positional argument
         else:
             # Check if it was passed as keyword argument
-            assert call_args[1].get('multiline') is True
+            assert call_args[1].get("multiline") is True
 
 
 async def test_filter_files_multiline_mcp():
     """Test multiline support through MCP interface."""
     test_content = "function example() {\n  return 'hello';\n}"
 
-    with patch('builtins.open', create=True) as mock_open:
-        mock_open.return_value.__enter__.return_value.read.return_value = test_content.encode()
+    with patch("builtins.open", create=True) as mock_open:
+        mock_open.return_value.__enter__.return_value.read.return_value = (
+            test_content.encode()
+        )
 
         with (
             patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
             patch.object(mcp_fd_server, "FZF_EXECUTABLE", "/mock/fzf"),
             patch("subprocess.check_output") as mock_fd_output,
-            patch("subprocess.Popen") as mock_popen
+            patch("subprocess.Popen") as mock_popen,
         ):
             # Mock fd listing files
             mock_fd_output.return_value = "test.js\n"
 
             # Mock fzf finding the function
             mock_fzf_proc = MagicMock()
-            mock_fzf_proc.communicate.return_value = (b"test.js:\nfunction example() {\n  return 'hello';\n}\x00", b"")
+            mock_fzf_proc.communicate.return_value = (
+                b"test.js:\nfunction example() {\n  return 'hello';\n}\x00",
+                b"",
+            )
             mock_popen.return_value = mock_fzf_proc
 
             async with client_session(mcp_fd_server.mcp._mcp_server) as client:
                 result = await client.call_tool(
-                    "filter_files",
-                    {"filter": "function", "multiline": True}
+                    "filter_files", {"filter": "function", "multiline": True}
                 )
 
                 data = json.loads(result.content[0].text)
