@@ -526,6 +526,8 @@ echo {test_file2}
         mock_fzf = tmp_path / "fzf.bat"
         # Create a Python script that fzf.bat will call
         fzf_py = tmp_path / "fzf_impl.py"
+        # Escape the path for use in Python string
+        escaped_path = str(test_file1).replace("\\", "\\\\")
         fzf_py.write_text(f'''import sys
 if "--read0" in sys.argv and "--print0" in sys.argv:
     # Read null-delimited input
@@ -533,7 +535,7 @@ if "--read0" in sys.argv and "--print0" in sys.argv:
     # Look for "function" in the content
     if b"function" in data:
         # Return matching file record with null terminator
-        content = "{test_file1}:\\nline 1\\nline 2\\nfunction foo() {{\\n  return bar;\\n}}"
+        content = "{escaped_path}:\\nline 1\\nline 2\\nfunction foo() {{\\n  return bar;\\n}}"
         print(content, end="\\0")
 ''')
         mock_fzf.write_text(f'@echo off\n{sys.executable} "{fzf_py}" %*')

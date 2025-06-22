@@ -497,6 +497,8 @@ if "%1"=="--files" (
         mock_fzf = tmp_path / "fzf.bat"
         # Create a Python script that fzf.bat will call
         fzf_py = tmp_path / "fzf_impl.py"
+        # Use forward slashes for the path
+        normalized_path = normalize_path(test_file1)
         fzf_py.write_text(f'''import sys
 if "--read0" in sys.argv and "--print0" in sys.argv:
     # Read null-delimited input
@@ -505,7 +507,7 @@ if "--read0" in sys.argv and "--print0" in sys.argv:
     if b"class" in data:
         # Return matching file record with null terminator
         # Use forward slashes for consistency
-        content = "{normalize_path(test_file1)}:\\nclass UserService:\\n    def authenticate(self, user):\\n        if user.is_valid:\\n            return True\\n        return False"
+        content = "{normalized_path}:\\nclass UserService:\\n    def authenticate(self, user):\\n        if user.is_valid:\\n            return True\\n        return False"
         print(content, end="\\0")
 ''')
         mock_fzf.write_text(f'@echo off\n{sys.executable} "{fzf_py}" %*')
