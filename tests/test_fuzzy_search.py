@@ -13,6 +13,12 @@ from mcp.shared.memory import (
 
 import mcp_fuzzy_search
 
+
+def normalize_path(path):
+    """Normalize path to use forward slashes for cross-platform testing."""
+    # Use pathlib for proper path handling
+    return Path(path).as_posix()
+
 pytestmark = pytest.mark.anyio
 
 

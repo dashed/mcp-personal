@@ -43,10 +43,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import platform
 import shlex
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -60,6 +62,47 @@ logger = logging.getLogger(__name__)
 
 RG_EXECUTABLE: str | None = shutil.which("rg")
 FZF_EXECUTABLE: str | None = shutil.which("fzf")
+
+# Platform detection
+IS_WINDOWS = platform.system() == "Windows"
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize path to use forward slashes consistently across platforms."""
+    # Use pathlib for proper path handling
+    return Path(path).as_posix()
+
+
+def _parse_ripgrep_line(line: str) -> tuple[str, int, str] | None:
+    """Parse a ripgrep output line, handling Windows paths correctly.
+    
+    Returns (file_path, line_number, content) or None if parsing fails.
+    """
+    if not line:
+        return None
+    
+    # On Windows, check if line starts with a drive letter (e.g., C:\)
+    if IS_WINDOWS and len(line) >= 3 and line[1] == ':' and line[0].isalpha():
+        # Windows path format: C:\path\file.py:10:content
+        parts = line.split(':', 3)
+        if len(parts) >= 4:
+            try:
+                file_path = parts[0] + ':' + parts[1]  # C:\path\file.py
+                line_num = int(parts[2])
+                content = parts[3] if len(parts) > 3 else ""
+                return (_normalize_path(file_path), line_num, content.strip())
+            except (ValueError, IndexError):
+                return None
+    else:
+        # Unix path format: /path/file.py:10:content
+        parts = line.split(':', 2)
+        if len(parts) >= 3:
+            try:
+                return (_normalize_path(parts[0]), int(parts[1]), parts[2].strip())
+            except (ValueError, IndexError):
+                return None
+    
+    return None
 
 
 class BinaryMissing(RuntimeError):
@@ -139,23 +182,27 @@ def fuzzy_search_files(
     try:
         if multiline:
             # For multiline mode, get file list first, then read contents
+            # Ensure path is properly formatted
+            search_path = str(Path(path).resolve())
             rg_list_cmd: list[str] = [rg_bin, "--files"]
             if hidden:
                 rg_list_cmd.append("--hidden")
-            rg_list_cmd.append(path)
+            rg_list_cmd.append(search_path)
 
             # Get file list
             file_list_result = subprocess.check_output(rg_list_cmd, text=True)
-            file_paths = [p for p in file_list_result.splitlines() if p]
+            file_paths = [str(Path(p).resolve()) for p in file_list_result.splitlines() if p]
 
             # Build multiline input with null separators
             multiline_input = b""
             for file_path in file_paths:
                 try:
-                    with open(file_path, "rb") as f:
+                    path_obj = Path(file_path)
+                    with path_obj.open("rb") as f:
                         content = f.read()
                         # Create record: filename: + content + null separator
-                        record = f"{file_path}:\n".encode() + content + b"\0"
+                        normalized_path = _normalize_path(file_path)
+                        record = f"{normalized_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except (OSError, UnicodeDecodeError):
                     continue  # Skip files that can't be read
@@ -182,10 +229,12 @@ def fuzzy_search_files(
                             matches.append(chunk.decode("utf-8", errors="replace"))
         else:
             # Standard mode - file paths only
+            # Ensure path is properly formatted
+            search_path = str(Path(path).resolve())
             rg_cmd: list[str] = [rg_bin, "--files"]
             if hidden:
                 rg_cmd.append("--hidden")
-            rg_cmd.append(path)
+            rg_cmd.append(search_path)
 
             # Pipe through fzf for fuzzy filtering
             fzf_cmd: list[str] = [fzf_bin, "--filter", filter]
@@ -203,7 +252,7 @@ def fuzzy_search_files(
             out, _ = fzf_proc.communicate()
             rg_proc.wait()
 
-            matches = [p for p in out.splitlines() if p]
+            matches = [_normalize_path(p) for p in out.splitlines() if p]
 
         # Apply limit
         matches = matches[:limit]
@@ -304,17 +353,20 @@ def fuzzy_search_content(
                     ]:
                         safe_flags.append(flag)
                 rg_list_cmd.extend(safe_flags)
-            rg_list_cmd.append(path)
+            # Ensure path is properly formatted
+            search_path = str(Path(path).resolve())
+            rg_list_cmd.append(search_path)
 
             # Get file list
             file_list_result = subprocess.check_output(rg_list_cmd, text=True)
-            file_paths = [p for p in file_list_result.splitlines() if p]
+            file_paths = [str(Path(p).resolve()) for p in file_list_result.splitlines() if p]
 
             # Build multiline input with file contents
             multiline_input = b""
             for file_path in file_paths:
                 try:
-                    with open(file_path, "rb") as f:
+                    path_obj = Path(file_path)
+                    with path_obj.open("rb") as f:
                         content = f.read()
                         # Only include files that match the pattern if not default
                         if pattern != ".":
@@ -332,7 +384,8 @@ def fuzzy_search_content(
                                     continue
 
                         # Create record: filename + content + null separator
-                        record = f"{file_path}:\n".encode() + content + b"\0"
+                        normalized_path = _normalize_path(file_path)
+                        record = f"{normalized_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except (OSError, UnicodeDecodeError):
                     continue
@@ -381,7 +434,9 @@ def fuzzy_search_content(
                 rg_cmd.append("--hidden")
             if rg_flags:
                 rg_cmd.extend(shlex.split(rg_flags))
-            rg_cmd.extend([pattern, path])
+            # Ensure path is properly formatted
+            search_path = str(Path(path).resolve())
+            rg_cmd.extend([pattern, search_path])
 
             # Pipe through fzf for fuzzy filtering
             fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--delimiter", ":"]
@@ -411,13 +466,16 @@ def fuzzy_search_content(
             for line in out.splitlines():
                 if not line:
                     continue
-                parts = line.split(":", 2)
-                if len(parts) >= 3:
+                
+                # Use the helper function to parse ripgrep output
+                parsed = _parse_ripgrep_line(line)
+                if parsed:
+                    file_path, line_num, content = parsed
                     matches.append(
                         {
-                            "file": parts[0],
-                            "line": int(parts[1]),
-                            "content": parts[2].strip(),
+                            "file": file_path,
+                            "line": line_num,
+                            "content": content,
                         }
                     )
 

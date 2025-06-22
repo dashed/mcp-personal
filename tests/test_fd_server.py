@@ -13,6 +13,12 @@ from mcp.shared.memory import (
 
 import mcp_fd_server
 
+
+def normalize_path(path):
+    """Normalize path to use forward slashes for cross-platform testing."""
+    # Use pathlib for proper path handling
+    return Path(path).as_posix()
+
 pytestmark = pytest.mark.anyio
 
 
@@ -46,10 +52,10 @@ async def test_search_files_finds_python(tmp_path: Path):
 
         data = json.loads(content.text)
         assert "matches" in data
-        assert str(tmp_path / "one.py") in data["matches"]
-        assert str(tmp_path / "subdir" / "three.py") in data["matches"]
+        assert normalize_path(tmp_path / "one.py") in data["matches"]
+        assert normalize_path(tmp_path / "subdir" / "three.py") in data["matches"]
         assert all(p.endswith(".py") for p in data["matches"])
-        assert str(tmp_path / "two.txt") not in data["matches"]
+        assert normalize_path(tmp_path / "two.txt") not in data["matches"]
 
 
 async def test_search_files_with_flags(tmp_path: Path):
@@ -76,9 +82,9 @@ async def test_search_files_with_flags(tmp_path: Path):
         data_with_hidden = json.loads(result_with_hidden.content[0].text)
 
         # Assert
-        assert str(tmp_path / "visible.py") in data_no_hidden["matches"]
-        assert str(tmp_path / ".hidden.py") not in data_no_hidden["matches"]
-        assert str(tmp_path / ".hidden.py") in data_with_hidden["matches"]
+        assert normalize_path(tmp_path / "visible.py") in data_no_hidden["matches"]
+        assert normalize_path(tmp_path / ".hidden.py") not in data_no_hidden["matches"]
+        assert normalize_path(tmp_path / ".hidden.py") in data_with_hidden["matches"]
 
 
 async def test_search_files_error_handling():
@@ -117,7 +123,7 @@ async def test_filter_files_returns_best_match(tmp_path: Path):
         data = json.loads(result.content[0].text)
         assert "matches" in data
         assert len(data["matches"]) == 1
-        assert data["matches"][0] == str(tmp_path / "main.rs")
+        assert data["matches"][0] == normalize_path(tmp_path / "main.rs")
 
 
 async def test_filter_files_multiple_matches(tmp_path: Path):

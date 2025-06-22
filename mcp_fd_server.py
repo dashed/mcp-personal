@@ -50,10 +50,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import platform
 import shlex
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP  # high‑level helper inside the SDK
@@ -67,6 +69,15 @@ logger = logging.getLogger(__name__)
 
 FD_EXECUTABLE: str | None = shutil.which("fd") or shutil.which("fdfind")
 FZF_EXECUTABLE: str | None = shutil.which("fzf")
+
+# Platform detection
+IS_WINDOWS = platform.system() == "Windows"
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize path to use forward slashes consistently across platforms."""
+    # Use pathlib for proper path handling
+    return Path(path).as_posix()
 
 
 class BinaryMissing(RuntimeError):
@@ -112,13 +123,16 @@ def search_files(
         return {"error": "'pattern' argument is required"}
 
     fd_bin = _require(FD_EXECUTABLE, "fd")
-    cmd: list[str] = [fd_bin, *shlex.split(flags), pattern, path]
+    # Ensure path is properly formatted
+    search_path = str(Path(path).resolve())
+    cmd: list[str] = [fd_bin, *shlex.split(flags), pattern, search_path]
 
     logger.debug("Running fd: %s", " ".join(shlex.quote(c) for c in cmd))
 
     try:
         out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-        return {"matches": [p for p in out.splitlines() if p]}
+        matches = [_normalize_path(p) for p in out.splitlines() if p]
+        return {"matches": matches}
     except subprocess.CalledProcessError as exc:
         return {"error": exc.output.strip() or str(exc)}
 
@@ -167,10 +181,13 @@ def filter_files(
 
     fd_bin = _require(FD_EXECUTABLE, "fd")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
+    
+    # Ensure path is properly formatted
+    search_path = str(Path(path).resolve())
 
     if multiline:
         # For multiline mode, find files first, then read contents with null separators
-        fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, path]
+        fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, search_path]
 
         try:
             # Get file list from fd
@@ -184,7 +201,8 @@ def filter_files(
                     with open(file_path, "rb") as f:
                         content = f.read()
                         # Add filename prefix and null separator
-                        record = f"{file_path}:\n".encode() + content + b"\0"
+                        normalized_path = _normalize_path(file_path)
+                        record = f"{normalized_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except OSError:
                     continue  # Skip files that can't be read
@@ -215,7 +233,7 @@ def filter_files(
             return {"error": str(exc)}
     else:
         # Standard mode - file paths only
-        fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, path]
+        fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, search_path]
         fzf_cmd: list[str] = [fzf_bin, "--filter", filter, *shlex.split(fzf_flags)]
 
         logger.debug("Pipeline: %s | %s", " ".join(fd_cmd), " ".join(fzf_cmd))
@@ -225,7 +243,7 @@ def filter_files(
             out = subprocess.check_output(fzf_cmd, stdin=fd_proc.stdout, text=True)
             fd_proc.stdout.close()
             fd_proc.wait()
-            matches = [p for p in out.splitlines() if p]
+            matches = [_normalize_path(p) for p in out.splitlines() if p]
         except subprocess.CalledProcessError as exc:
             return {"error": str(exc)}
 
