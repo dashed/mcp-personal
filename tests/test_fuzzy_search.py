@@ -1,6 +1,5 @@
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -485,63 +484,22 @@ def process_request():
         "class User:\n    def __init__(self):\n        self.name = ''\n        self.email = ''"
     )
 
-    if platform.system() == "Windows":
-        mock_rg = tmp_path / "rg.bat"
-        mock_rg.write_text(f"""@echo off
-if "%1"=="--files" (
-    echo {test_file1}
-    echo {test_file2}
-)
-""")
+    # Use subprocess mocking instead of PATH manipulation for better reliability
+    with (
+        patch.object(mcp_fuzzy_search, "RG_EXECUTABLE", "/mock/rg"),
+        patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"),
+        patch("subprocess.check_output") as mock_rg,
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        # Mock rg listing files
+        mock_rg.return_value = f"{test_file1}\n{test_file2}\n"
 
-        mock_fzf = tmp_path / "fzf.bat"
-        # Create a Python script that fzf.bat will call
-        fzf_py = tmp_path / "fzf_impl.py"
-        # Use forward slashes for the path
-        normalized_path = normalize_path(test_file1)
-        fzf_py.write_text(f'''import sys
-if "--read0" in sys.argv and "--print0" in sys.argv:
-    # Read null-delimited input
-    data = sys.stdin.buffer.read()
-    # Look for "class.*:" pattern in the content
-    if b"class" in data:
-        # Return matching file record with null terminator
-        # Use forward slashes for consistency
-        content = "{normalized_path}:\\nclass UserService:\\n    def authenticate(self, user):\\n        if user.is_valid:\\n            return True\\n        return False"
-        print(content, end="\\0")
-''')
-        mock_fzf.write_text(f'@echo off\n{sys.executable} "{fzf_py}" %*')
-    else:
-        mock_rg = tmp_path / "rg"
-        mock_rg.write_text(f'''#!/usr/bin/env python3
-import sys
-if "--files" in sys.argv:
-    print("{test_file1}")
-    print("{test_file2}")
-''')
-        mock_rg.chmod(0o755)
-
-        mock_fzf = tmp_path / "fzf"
-        mock_fzf.write_text(f'''#!/usr/bin/env python3
-import sys
-if "--read0" in sys.argv and "--print0" in sys.argv:
-    # Read null-delimited input
-    data = sys.stdin.buffer.read()
-    # Look for "class.*:" pattern in the content
-    if b"class" in data:
-        # Return matching file record with null terminator
-        content = "{test_file1}:\\nclass UserService:\\n    def authenticate(self, user):\\n        if user.is_valid:\\n            return True\\n        return False"
-        print(content, end="\\0")
-''')
-        mock_fzf.chmod(0o755)
-
-    with monkeypatch.context() as m:
-        path_sep = ";" if platform.system() == "Windows" else ":"
-        m.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
-
-        # Reload module globals to pick up new executables
-        mcp_fuzzy_search.RG_EXECUTABLE = shutil.which("rg")
-        mcp_fuzzy_search.FZF_EXECUTABLE = shutil.which("fzf")
+        # Mock fzf finding the class
+        mock_fzf_proc = MagicMock()
+        normalized_path = normalize_path(str(test_file1))
+        expected_output = f"{normalized_path}:\nclass UserService:\n    def authenticate(self, user):\n        if user.is_valid:\n            return True\n        return False\n\ndef process_request():\n    pass\n\x00"
+        mock_fzf_proc.communicate.return_value = (expected_output.encode(), b"")
+        mock_popen.return_value = mock_fzf_proc
 
         result = mcp_fuzzy_search.fuzzy_search_content(
             "class", str(tmp_path), multiline=True
