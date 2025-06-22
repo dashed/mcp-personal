@@ -81,26 +81,42 @@ cd mcp-personal
 The easiest way to add MCP servers to Claude Code is using the CLI:
 
 ```bash
-# Add published npm servers
-claude mcp add sequential_thinking npx @modelcontextprotocol/server-sequential-thinking
+# Add published npm servers (recommended to use -s user for global access)
+claude mcp add sequential-thinking -s user -- npx -y @modelcontextprotocol/server-sequential-thinking
 
 # Add custom Python servers from this repository
-# First, make sure the script is executable
-chmod +x /path/to/mcp-personal/mcp_fd_server.py
+# IMPORTANT: Use -s user for personal tools you want available across all projects
+# Without -s flag, servers are only available in current directory and are temporary
 
-# Then add it to Claude Code
-claude mcp add file-search /path/to/mcp-personal/mcp_fd_server.py
-claude mcp add fuzzy-search /path/to/mcp-personal/mcp_fuzzy_search.py
+# Using relative paths (when in the project directory)
+cd /path/to/mcp-personal
+claude mcp add file-search -s user -- ./mcp_fd_server.py
+claude mcp add fuzzy-search -s user -- ./mcp_fuzzy_search.py
+
+# Using absolute paths (works from anywhere)
+claude mcp add file-search -s user -- /path/to/mcp-personal/mcp_fd_server.py
+claude mcp add fuzzy-search -s user -- /path/to/mcp-personal/mcp_fuzzy_search.py
 
 # Add Python servers with Python interpreter explicitly
-claude mcp add my-server python /path/to/my_mcp_server.py
+claude mcp add my-server -s user -- python /path/to/my_mcp_server.py
 
 # Add servers with arguments
-claude mcp add my-server python /path/to/server.py --arg1 value1 --arg2 value2
+claude mcp add my-server -s user -- python /path/to/server.py arg1 arg2
 
 # Add servers with environment variables
-claude mcp add my-server --env API_KEY=your_key --env DEBUG=true python /path/to/server.py
+claude mcp add my-server -s user -e API_KEY=your_key -e DEBUG=true -- python /path/to/server.py
+
+# Scope options:
+# -s local (default): Temporary, only in current directory
+# -s project: Shared with team via .mcp.json file
+# -s user: Personal, available across all your projects (recommended)
 ```
+
+**Note:** 
+- The `--` separator is important before the command and its arguments
+- Environment variables use `-e KEY=value` syntax
+- Use `-s user` for personal servers available across all projects
+- Both relative and absolute paths work
 
 #### Manual Configuration (Claude Desktop)
 
