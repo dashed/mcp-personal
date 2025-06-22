@@ -93,6 +93,34 @@ dev: install-dev ## Alias for install-dev
 # CI/CD targets
 ci: clean check ## Run CI pipeline (clean, then all checks)
 
+ci-local: ## Run all CI checks locally (format check, lint, type-check, tests)
+	@echo "=== Running CI checks locally ==="
+	@echo "1. Checking code formatting..."
+	@uv run ruff format --check $(SRC_FILES) || (echo "❌ Code needs formatting. Run 'make format' to fix." && exit 1)
+	@echo "✓ Code formatting check passed"
+	@echo ""
+	@echo "2. Running linting..."
+	@uv run ruff check $(SRC_FILES) || (echo "❌ Linting failed. Fix the issues above." && exit 1)
+	@echo "✓ Linting passed"
+	@echo ""
+	@echo "3. Running type checks..."
+	@if command -v pyright > /dev/null 2>&1; then \
+		uv run pyright $(SRC_FILES) || (echo "❌ Type checking failed." && exit 1); \
+	else \
+		echo "⚠️  Pyright not installed, skipping type checks"; \
+	fi
+	@echo "✓ Type checking passed (or skipped)"
+	@echo ""
+	@echo "4. Checking dependencies..."
+	@which fd > /dev/null 2>&1 || which fdfind > /dev/null 2>&1 || echo "⚠️  Warning: fd not found - some tests may be skipped"
+	@which fzf > /dev/null 2>&1 || echo "⚠️  Warning: fzf not found - some tests may be skipped"
+	@which rg > /dev/null 2>&1 || echo "⚠️  Warning: ripgrep not found - some tests may be skipped"
+	@echo ""
+	@echo "5. Running tests..."
+	@PYTHONPATH=. $(PYTEST) $(TEST_PATH) -v || (echo "❌ Tests failed." && exit 1)
+	@echo ""
+	@echo "✅ All CI checks passed!"
+
 # Quick test during development
 qt: test-simple ## Quick test (alias for test-simple)
 
