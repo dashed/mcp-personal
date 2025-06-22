@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -79,8 +80,16 @@ def test_cli_help():
 def test_cli_search_mocked(tmp_path: Path, monkeypatch):
     """Test CLI search with mocked subprocess behavior."""
     # Create a mock fd executable that returns predefined output
-    mock_fd = tmp_path / "fd"
-    mock_fd.write_text("""#!/usr/bin/env python3
+    if platform.system() == "Windows":
+        mock_fd = tmp_path / "fd.bat"
+        mock_fd.write_text("""@echo off
+echo src/main.py
+echo src/test.py
+for %%i in (%*) do if "%%i"=="--hidden" echo src/.hidden/config.py
+""")
+    else:
+        mock_fd = tmp_path / "fd"
+        mock_fd.write_text("""#!/usr/bin/env python3
 import sys
 # Mock fd that ignores all arguments and returns predefined output
 print("src/main.py")
@@ -88,10 +97,11 @@ print("src/test.py")
 if "--hidden" in sys.argv:
     print("src/.hidden/config.py")
 """)
-    mock_fd.chmod(0o755)
+        mock_fd.chmod(0o755)
 
     # Add the tmp_path to PATH so our mock fd is found first
-    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+    path_sep = ";" if platform.system() == "Windows" else ":"
+    monkeypatch.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
 
     # Run the CLI command with the mock
     result = subprocess.run(

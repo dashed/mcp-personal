@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -484,17 +485,42 @@ def process_request():
         "class User:\n    def __init__(self):\n        self.name = ''\n        self.email = ''"
     )
 
-    mock_rg = tmp_path / "rg"
-    mock_rg.write_text(f'''#!/usr/bin/env python3
+    if platform.system() == "Windows":
+        mock_rg = tmp_path / "rg.bat"
+        mock_rg.write_text(f"""@echo off
+if "%1"=="--files" (
+    echo {test_file1}
+    echo {test_file2}
+)
+""")
+
+        mock_fzf = tmp_path / "fzf.bat"
+        # Create a Python script that fzf.bat will call
+        fzf_py = tmp_path / "fzf_impl.py"
+        fzf_py.write_text(f'''import sys
+if "--read0" in sys.argv and "--print0" in sys.argv:
+    # Read null-delimited input
+    data = sys.stdin.buffer.read()
+    # Look for "class.*:" pattern in the content
+    if b"class" in data:
+        # Return matching file record with null terminator
+        # Use forward slashes for consistency
+        content = "{normalize_path(test_file1)}:\\nclass UserService:\\n    def authenticate(self, user):\\n        if user.is_valid:\\n            return True\\n        return False"
+        print(content, end="\\0")
+''')
+        mock_fzf.write_text(f'@echo off\n{sys.executable} "{fzf_py}" %*')
+    else:
+        mock_rg = tmp_path / "rg"
+        mock_rg.write_text(f'''#!/usr/bin/env python3
 import sys
 if "--files" in sys.argv:
     print("{test_file1}")
     print("{test_file2}")
 ''')
-    mock_rg.chmod(0o755)
+        mock_rg.chmod(0o755)
 
-    mock_fzf = tmp_path / "fzf"
-    mock_fzf.write_text(f'''#!/usr/bin/env python3
+        mock_fzf = tmp_path / "fzf"
+        mock_fzf.write_text(f'''#!/usr/bin/env python3
 import sys
 if "--read0" in sys.argv and "--print0" in sys.argv:
     # Read null-delimited input
@@ -505,10 +531,11 @@ if "--read0" in sys.argv and "--print0" in sys.argv:
         content = "{test_file1}:\\nclass UserService:\\n    def authenticate(self, user):\\n        if user.is_valid:\\n            return True\\n        return False"
         print(content, end="\\0")
 ''')
-    mock_fzf.chmod(0o755)
+        mock_fzf.chmod(0o755)
 
     with monkeypatch.context() as m:
-        m.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        m.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
 
         # Reload module globals to pick up new executables
         mcp_fuzzy_search.RG_EXECUTABLE = shutil.which("rg")
@@ -521,7 +548,7 @@ if "--read0" in sys.argv and "--print0" in sys.argv:
         assert "matches" in result
         matches = result["matches"]
         assert len(matches) > 0
-        assert matches[0]["file"] == str(test_file1)
+        assert normalize_path(matches[0]["file"]) == normalize_path(str(test_file1))
         assert "class UserService:" in matches[0]["content"]
         assert "def authenticate" in matches[0]["content"]
 

@@ -1,10 +1,16 @@
 """Simplified tests for mcp_fd_server using direct function calls."""
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 import mcp_fd_server
+
+
+def normalize_path(path):
+    """Normalize path to use forward slashes for cross-platform testing."""
+    return Path(path).as_posix()
 
 
 @patch("subprocess.check_output")
@@ -88,4 +94,4 @@ def test_cli_functionality(mock_check_output, tmp_path):
     assert "matches" in result
     matches = result["matches"]
     assert len(matches) == 1
-    assert str(test_file) in matches[0]
+    assert normalize_path(str(test_file)) in matches[0]
