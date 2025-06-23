@@ -20,25 +20,18 @@ Tools exposed to LLMs
 * **`fuzzy_search_content`** – Search file contents with ripgrep, then apply
   fuzzy filtering to the results.
 
-Understanding the Two-Stage Pipeline
------------------------------------
-    Files → ripgrep (regex) → Lines → fzf (fuzzy) → Results
-             ↑                         ↑
-      'regex_pattern'           'fuzzy_filter'
+Understanding the Search Pipeline
+--------------------------------
+    Files → ripgrep (all lines) → Lines → fzf (fuzzy filter) → Results
+                                           ↑
+                                    'fuzzy_filter'
 
-Common Mistakes to Avoid
------------------------
-1. **Using regex in the fuzzy_filter parameter**:
-   ❌ WRONG: fuzzy_filter="def test_.*credit", regex_pattern="def test_"
-   ✅ RIGHT: fuzzy_filter="test credit", regex_pattern="def test_"
-
-2. **Using fuzzy terms in the regex_pattern parameter**:
-   ❌ WRONG: regex_pattern="find this text"
-   ✅ RIGHT: regex_pattern="find.*this.*text" or regex_pattern="find|this|text"
-
-3. **Confusing which parameter does what**:
-   - 'regex_pattern': Regular expression for ripgrep (first stage)
-   - 'fuzzy_filter': Fuzzy search terms for fzf (second stage)
+Key Features
+-----------
+- Searches through ALL file contents by default
+- Uses fuzzy matching to find relevant lines
+- Supports advanced fzf syntax (OR, exact match, exclusions)
+- Can be optimized with rg_flags for specific file types
 
 Quick start
 -----------
@@ -51,7 +44,7 @@ chmod +x mcp_fuzzy_search.py
 
 # 1. CLI usage
 ./mcp_fuzzy_search.py search-files "main" src
-./mcp_fuzzy_search.py search-content "implement" . --regex-pattern "TODO"
+./mcp_fuzzy_search.py search-content "TODO implement" .
 ./mcp_fuzzy_search.py --examples  # Show usage examples
 
 # 2. Run as MCP server
@@ -407,65 +400,45 @@ def fuzzy_search_files(
 
 @mcp.tool(
     description=(
-        "Search file contents using a two-stage pipeline:\n\n"
-        "    Files → ripgrep (regex) → Lines → fzf (fuzzy) → Results\n"
-        "             ↑                         ↑\n"
-        "      'regex_pattern'           'fuzzy_filter'\n\n"
-        "CORRECT USAGE:\n"
-        '  ✓ regex_pattern: "TODO|FIXME"      fuzzy_filter: "implement database"\n'
-        '  ✓ regex_pattern: "def test_"       fuzzy_filter: "seer credit"\n'
-        '  ✓ regex_pattern: "class"           fuzzy_filter: "Model save"\n\n'
-        "INCORRECT USAGE (Common Mistakes):\n"
-        '  ✗ regex_pattern: "def test_.*seer" fuzzy_filter: "def test_.*seer"  # Don\'t use regex in filter!\n'
-        '  ✗ regex_pattern: "find this text"  fuzzy_filter: "find this text"   # Pattern needs regex syntax\n\n'
+        "Search file contents using fuzzy filtering.\n\n"
+        "    Files → ripgrep (all lines) → fzf (fuzzy filter) → Results\n\n"
         "Args:\n"
-        "  fuzzy_filter  (str): fzf fuzzy search query. NOT regex! Required.\n"
-        "  path    (str, optional): Directory/file to search. Defaults to current dir.\n"
-        "  regex_pattern (str, optional): Regex pattern for ripgrep. Default '.' (all lines).\n"
-        "  hidden  (bool, optional): Search hidden files. Default false.\n"
-        "  limit   (int, optional): Max results to return. Default 20.\n"
-        "  rg_flags (str, optional): Extra flags for ripgrep.\n"
+        "  fuzzy_filter (str): Fuzzy search query. Required.\n"
+        "  path (str, optional): Directory/file to search. Defaults to current dir.\n"
+        "  hidden (bool, optional): Search hidden files. Default false.\n"
+        "  limit (int, optional): Max results to return. Default 20.\n"
+        "  rg_flags (str, optional): Extra flags for ripgrep (see below).\n"
         "  multiline (bool, optional): Enable multiline record processing. Default false.\n\n"
-        "Understanding the Two-Stage Process:\n"
-        "  1. REGEX_PATTERN (ripgrep): Finds lines matching regex\n"
-        "     - Uses regular expressions\n"
-        '     - Examples: "TODO", "def \\w+\\(", "import.*pandas"\n'
-        "  2. FUZZY_FILTER (fzf): Fuzzy filters the results\n"
-        "     - Uses fuzzy matching on 'file:line:content' format\n"
-        '     - Examples: "database save", "test user auth"\n\n'
-        "fzf Filter Syntax (Fuzzy Matching):\n"
-        "  Basic Terms: Space-separated for AND logic\n"
-        "    'TODO implement' → lines with both 'TODO' AND 'implement'\n"
-        "  OR Logic: Use | for alternatives\n"
-        "    'TODO | FIXME | BUG' → lines with any of these markers\n"
-        "  File Filtering: Target specific files in results\n"
-        "    'main.py:' → only results from main.py files\n"
-        "    '.js: function' → function definitions in JS files\n"
-        "  Exact Content: Wrap in single quotes\n"
-        "    ''def __init__'' → exact match for 'def __init__'\n"
-        "    'import → partial exact match starting with 'import'\n"
-        "  Exclude Patterns: Use ! to negate\n"
-        "    'function !test' → functions not in test files\n"
-        "    'config !.bak$' → config without backup files\n\n"
-        "Useful rg_flags:\n"
-        "  Case: '-i' (ignore), '-S' (smart), '-s' (sensitive)\n"
-        "  Types: '-t py' (Python only), '-T test' (exclude tests)\n"
-        "  Context: '-A 3' (after), '-B 2' (before), '-C 3' (both)\n"
-        "  Examples: '-i -C 2', '-t py --no-ignore', '-F -w'\n\n"
+        "Fuzzy Filter Syntax:\n"
+        "  Basic search: 'update_ondemand_max_spend' → finds all occurrences\n"
+        "  Multiple terms: 'update spend' → lines with both terms\n"
+        "  OR logic: 'update | modify' → lines with either term\n"
+        "  File filtering: 'test.py: update' → only in test.py files\n"
+        "  Exact match: ''exact phrase'' → exact string match\n"
+        "  Exclusion: 'update !test' → exclude test files\n"
+        "  With prefix: '^def update' → lines starting with 'def update'\n"
+        "  With suffix: 'update$' → lines ending with 'update'\n\n"
+        "Useful rg_flags for search optimization:\n"
+        "  File Types: '-t py' (Python), '-t js' (JavaScript), '-T test' (exclude tests)\n"
+        "  Case: '-i' (ignore case), '-S' (smart case), '-s' (case sensitive)\n"
+        "  Context: '-A 3' (lines after), '-B 2' (lines before), '-C 3' (both)\n"
+        "  Exclusions: '--glob '!node_modules'' (exclude paths), '--max-filesize 1M'\n"
+        "  Special: '-w' (whole words), '-v' (invert match), '-U' (multiline)\n\n"
         "Examples:\n"
-        "  1. Find TODO comments about databases:\n"
-        '     regex_pattern="TODO" fuzzy_filter="database"\n'
-        "  2. Find test functions mentioning 'seer' and 'credit':\n"
-        '     regex_pattern="def test_" fuzzy_filter="seer credit"\n'
-        "  3. Find all async functions with error handling:\n"
-        '     regex_pattern="async def" fuzzy_filter="error try except"\n\n'
+        "  1. Find function definitions:\n"
+        '     fuzzy_filter="def update_ondemand_max_spend"\n'
+        "  2. Find TODO comments about billing:\n"
+        '     fuzzy_filter="TODO billing"\n'
+        "  3. Find imports in Python files only:\n"
+        '     fuzzy_filter="import pandas", rg_flags="-t py"\n'
+        "  4. Case-insensitive search with context:\n"
+        '     fuzzy_filter="UpdateOndemand", rg_flags="-i -C 2"\n\n'
         "Returns: { matches: Array<{file: string, line: number, content: string}> } or { error: string }"
     )
 )
 def fuzzy_search_content(
     fuzzy_filter: str,
     path: str = ".",
-    regex_pattern: str = ".",
     hidden: bool = False,
     limit: int = 20,
     rg_flags: str = "",
@@ -525,21 +498,7 @@ def fuzzy_search_content(
                     with path_obj.open("rb") as f:
                         content = f.read()
                         # Only include files that match the pattern if not default
-                        if regex_pattern != ".":
-                            # Quick check if pattern matches in content
-                            try:
-                                import re
-
-                                if not re.search(
-                                    regex_pattern.encode("utf-8"),
-                                    content,
-                                    re.IGNORECASE,
-                                ):
-                                    continue
-                            except re.error:
-                                # If pattern is invalid regex, treat as literal
-                                if regex_pattern.encode("utf-8") not in content:
-                                    continue
+                        # Always include all files since we're using "." pattern
 
                         # Create record: filename + content + null separator
                         normalized_path = _normalize_path(file_path)
@@ -601,7 +560,7 @@ def fuzzy_search_content(
                 rg_cmd.extend(shlex.split(rg_flags))
             # Ensure path is properly formatted
             search_path = str(Path(path).resolve())
-            rg_cmd.extend([regex_pattern, search_path])
+            rg_cmd.extend([".", search_path])  # Always search all lines
 
             # Pipe through fzf for fuzzy filtering
             fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter, "--delimiter", ":"]
@@ -655,16 +614,16 @@ def fuzzy_search_content(
 
         if not matches and not multiline:
             # Run diagnostic check to see if ripgrep found anything
-            rg_match_count = _run_ripgrep_only(regex_pattern, path, hidden, rg_flags)
+            rg_match_count = _run_ripgrep_only(".", path, hidden, rg_flags)
             if rg_match_count == 0:
                 result["diagnostic"] = (
-                    f"ripgrep found 0 matches for pattern '{regex_pattern}'. "
-                    f"Check if your regex pattern is correct."
+                    "No files found in the specified path. "
+                    "Check if the path exists and contains files."
                 )
             else:
                 result["diagnostic"] = (
-                    f"ripgrep found {rg_match_count} matches for pattern '{regex_pattern}', "
-                    f"but fzf filter '{fuzzy_filter}' matched none. "
+                    f"Found {rg_match_count} lines in files, "
+                    f"but fuzzy filter '{fuzzy_filter}' matched none. "
                 )
                 if _looks_like_regex(fuzzy_filter):
                     suggested = _suggest_fuzzy_terms(fuzzy_filter)
@@ -693,39 +652,35 @@ FUZZY SEARCH EXAMPLES
 ====================
 
 1. Find TODO comments about databases:
-   $ ./mcp_fuzzy_search.py search-content "database" --regex-pattern "TODO"
+   $ ./mcp_fuzzy_search.py search-content "TODO database"
 
 2. Find test functions mentioning 'seer' and 'credit':
-   $ ./mcp_fuzzy_search.py search-content "seer credit" --regex-pattern "def test_"
+   $ ./mcp_fuzzy_search.py search-content "def test_ seer credit"
 
 3. Find Python files in src directory:
    $ ./mcp_fuzzy_search.py search-files "src py$"
 
 4. Find all async functions with error handling:
-   $ ./mcp_fuzzy_search.py search-content "error try except" --regex-pattern "async def"
+   $ ./mcp_fuzzy_search.py search-content "async def error try except"
 
 5. Search with case-insensitive matching:
-   $ ./mcp_fuzzy_search.py search-content "config" --regex-pattern "CONFIG" --rg-flags "-i"
+   $ ./mcp_fuzzy_search.py search-content "config" --rg-flags "-i"
 
-COMMON MISTAKES TO AVOID
-========================
+FUZZY FILTER SYNTAX
+==================
 
-✗ DON'T use regex in the filter parameter:
-  $ ./mcp_fuzzy_search.py search-content "def test_.*seer.*credit"
-
-✓ DO use fuzzy search terms instead:
-  $ ./mcp_fuzzy_search.py search-content "test seer credit" --regex-pattern "def test_"
-
-✗ DON'T confuse the parameters:
-  fuzzy_filter: For fuzzy matching (space-separated terms)
-  regex_pattern: For regex matching (regular expressions)
+✓ Multiple terms (AND logic): "update spend"
+✓ OR logic: "update | modify | change"
+✓ Exact match: "'exact phrase'"
+✓ File filtering: "test.py: update"
+✓ Exclusion: "update !test"
 
 UNDERSTANDING THE PIPELINE
 =========================
 
-Files → ripgrep (--regex-pattern) → Lines → fzf (fuzzy_filter) → Results
-         ↑                                    ↑
-      regex search                       fuzzy filter
+Files → ripgrep (all lines) → Lines → fzf (fuzzy_filter) → Results
+                                         ↑
+                                   fuzzy search
 """
     print(examples)
 
@@ -765,9 +720,7 @@ def _cli() -> None:
     p_content.add_argument(
         "path", nargs="?", default=".", help="Directory/file to search"
     )
-    p_content.add_argument(
-        "--regex-pattern", default=".", help="Ripgrep pattern (default: all lines)"
-    )
+    # Removed --regex-pattern argument as we always use "." now
     p_content.add_argument("--hidden", action="store_true", help="Search hidden files")
     p_content.add_argument("--limit", type=int, default=20, help="Max results")
     p_content.add_argument("--rg-flags", default="", help="rg flags: '-i -C 3 -t py'")
@@ -794,7 +747,6 @@ def _cli() -> None:
         res = fuzzy_search_content(
             ns.fuzzy_filter,
             ns.path,
-            ns.regex_pattern,
             ns.hidden,
             ns.limit,
             ns.rg_flags,

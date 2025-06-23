@@ -105,9 +105,8 @@ def main():
         result = await client.call_tool(
             "fuzzy_search_content",
             {
-                "fuzzy_filter": "implement",
+                "fuzzy_filter": "TODO implement",
                 "path": str(tmp_path),
-                "regex_pattern": "TODO",
             },
         )
 
@@ -137,9 +136,8 @@ async def test_fuzzy_search_content_with_limit(tmp_path: Path):
         result = await client.call_tool(
             "fuzzy_search_content",
             {
-                "fuzzy_filter": "task",
+                "fuzzy_filter": "TODO task",
                 "path": str(tmp_path),
-                "regex_pattern": "TODO",
                 "limit": 5,
             },
         )
@@ -220,8 +218,7 @@ async def test_warns_on_regex_in_filter(tmp_path: Path):
         result = await client.call_tool(
             "fuzzy_search_content",
             {
-                "fuzzy_filter": "def test_.*seer.*credit",  # Regex in wrong parameter
-                "regex_pattern": "def test_",
+                "fuzzy_filter": "def test_.*seer.*credit",  # Regex in filter
                 "path": str(tmp_path),
             },
         )
@@ -242,12 +239,11 @@ async def test_diagnostic_messages_no_matches(tmp_path: Path):
     (tmp_path / "file2.py").write_text("class MyClass:\n    pass")
 
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
-        # Test 1: Pattern finds nothing
+        # Test: Filter doesn't match any content
         result = await client.call_tool(
             "fuzzy_search_content",
             {
-                "fuzzy_filter": "something",
-                "regex_pattern": "nonexistent_pattern",
+                "fuzzy_filter": "nonexistent_function_name",
                 "path": str(tmp_path),
             },
         )
@@ -255,23 +251,8 @@ async def test_diagnostic_messages_no_matches(tmp_path: Path):
         data = json.loads(result.content[0].text)
         assert len(data["matches"]) == 0
         assert "diagnostic" in data
-        assert "ripgrep found 0 matches" in data["diagnostic"]
-
-        # Test 2: Pattern finds matches but filter doesn't match
-        result = await client.call_tool(
-            "fuzzy_search_content",
-            {
-                "fuzzy_filter": "nonexistent",
-                "regex_pattern": "def",
-                "path": str(tmp_path),
-            },
-        )
-
-        data = json.loads(result.content[0].text)
-        assert len(data["matches"]) == 0
-        assert "diagnostic" in data
-        assert "ripgrep found" in data["diagnostic"]
-        assert "but fzf filter" in data["diagnostic"]
+        assert "Found" in data["diagnostic"]
+        assert "but fuzzy filter" in data["diagnostic"]
 
 
 async def test_fuzzy_search_files_regex_warning(tmp_path: Path):
@@ -332,7 +313,6 @@ async def test_fuzzy_search_content_case_sensitive(tmp_path: Path):
             {
                 "fuzzy_filter": "error",
                 "path": str(tmp_path),
-                "regex_pattern": "error",
                 "rg_flags": "-i",  # Case insensitive
             },
         )
@@ -376,8 +356,7 @@ async def test_list_tools():
 
         assert (
             content_tool.description
-            and "Search file contents using a two-stage pipeline"
-            in content_tool.description
+            and "Search file contents using fuzzy filtering" in content_tool.description
         )
         assert "fuzzy_filter" in content_tool.inputSchema["required"]
 
@@ -412,10 +391,8 @@ def test_cli_search_content(tmp_path: Path):
             sys.executable,
             "mcp_fuzzy_search.py",
             "search-content",
-            "implement",
+            "TODO implement",
             str(tmp_path),
-            "--regex-pattern",
-            "TODO",
         ],
         capture_output=True,
         text=True,
@@ -524,7 +501,7 @@ async def test_fuzzy_search_content_mocked(mock_popen):
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
             result = await client.call_tool(
                 "fuzzy_search_content",
-                {"fuzzy_filter": "implement", "path": ".", "regex_pattern": "TODO"},
+                {"fuzzy_filter": "TODO implement", "path": "."},
             )
 
             data = json.loads(result.content[0].text)
@@ -674,9 +651,9 @@ def test_multiline_cli_support():
         # Verify multiline=True was passed
         mock_search_content.assert_called_once()
         call_args = mock_search_content.call_args
-        # Function signature: fuzzy_search_content(filter, path, pattern, hidden, limit, rg_flags, multiline)
-        if len(call_args[0]) > 6:
-            assert call_args[0][6] is True  # positional argument
+        # Function signature: fuzzy_search_content(filter, path, hidden, limit, rg_flags, multiline)
+        if len(call_args[0]) > 5:
+            assert call_args[0][5] is True  # positional argument
         else:
             assert call_args[1].get("multiline") is True
 
