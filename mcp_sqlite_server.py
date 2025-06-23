@@ -20,6 +20,16 @@ Tools exposed to LLMs
 * **`describe_table`** – Get schema information for a specific table
 * **`create_table`** – Create a new table (if writes enabled)
 
+Database Path (db_path) Examples
+-------------------------------
+All tools accept an optional `db_path` parameter:
+
+* **Default**: Uses the db_path configured when starting the server
+* **Relative path**: `'data.db'`, `'./databases/app.db'`
+* **Absolute path**: `'/var/lib/myapp/data.db'`, `'C:\\Users\\Me\\data.db'`
+* **In-memory**: `':memory:'` - Creates a temporary in-memory database
+* **Home directory**: `'~/myapp/data.db'` - Expands to user's home directory
+
 Quick start
 -----------
 ```bash
@@ -30,11 +40,11 @@ chmod +x mcp_sqlite_server.py
 ./mcp_sqlite_server.py list-tables database.db
 ./mcp_sqlite_server.py describe-table users database.db
 
-# 2. Run as MCP server (read-only by default)
-./mcp_sqlite_server.py
+# 2. Run as MCP server with default database
+./mcp_sqlite_server.py --db-path /path/to/default.db
 
 # 3. Run with write permissions
-./mcp_sqlite_server.py --allow-writes
+./mcp_sqlite_server.py --allow-writes --db-path /path/to/default.db
 ```
 
 Configuration
@@ -42,6 +52,10 @@ Configuration
 Write operations are disabled by default for safety. Enable with:
 - CLI flag: --allow-writes
 - Environment variable: MCP_SQLITE_ALLOW_WRITES=true
+
+Default database path can be set with:
+- CLI flag: --db-path /path/to/database.db
+- Or specify db_path in each tool call
 """
 
 from __future__ import annotations
@@ -93,6 +107,10 @@ class SQLiteContext:
                 self._memory_conn = sqlite3.connect(":memory:")
                 self._memory_conn.row_factory = sqlite3.Row
             return self._memory_conn
+
+        # Expand home directory if present
+        if path.startswith("~"):
+            path = str(Path(path).expanduser())
 
         # Ensure the database file exists or can be created
         db_file = Path(path)
@@ -154,9 +172,12 @@ mcp = FastMCP("SQLite Database", lifespan=lifespan)
         "Returns:\n"
         "  List of dictionaries representing rows, or error message\n\n"
         "Examples:\n"
-        "  query('SELECT * FROM users')\n"
-        "  query('SELECT name, email FROM users WHERE active = 1')\n"
-        "  query('SELECT COUNT(*) as count FROM orders')"
+        "  query('SELECT * FROM users')  # Uses default db_path\n"
+        "  query('SELECT * FROM users', 'myapp.db')  # Specific database\n"
+        "  query('SELECT * FROM users', '/path/to/data.db')  # Absolute path\n"
+        "  query('SELECT * FROM users', ':memory:')  # In-memory database\n"
+        "  query('SELECT name, email FROM users WHERE active = 1', 'users.db')\n"
+        "  query('SELECT COUNT(*) as count FROM orders', 'sales.db')"
     )
 )
 async def query(query: str, db_path: str | None = None) -> dict[str, Any]:
@@ -197,9 +218,12 @@ async def query(query: str, db_path: str | None = None) -> dict[str, Any]:
         "Returns:\n"
         "  Success status with affected row count, or error message\n\n"
         "Examples:\n"
-        "  execute('INSERT INTO users (name, email) VALUES (?, ?)', ['John', 'john@example.com'])\n"
-        '  execute(\'UPDATE users SET active = 0 WHERE last_login < date("now", "-1 year")\')\n'
-        "  execute('DELETE FROM sessions WHERE expired = 1')"
+        "  execute('INSERT INTO users (name, email) VALUES (\"John\", \"john@example.com\")')  # Uses default db_path\n"
+        "  execute('INSERT INTO logs (message) VALUES (\"Started\")', 'app.db')  # Specific database\n"
+        "  execute('UPDATE users SET active = 0 WHERE id = 5', '/var/data/users.db')  # Absolute path\n"
+        "  execute('UPDATE settings SET value = \"dark\" WHERE key = \"theme\"', ':memory:')  # In-memory database\n"
+        '  execute(\'UPDATE users SET active = 0 WHERE last_login < date("now", "-1 year")\', \'users.db\')\n'
+        "  execute('DELETE FROM sessions WHERE expired = 1', 'sessions.db')"
     )
 )
 async def execute(query: str, db_path: str | None = None) -> dict[str, Any]:
@@ -242,7 +266,13 @@ async def execute(query: str, db_path: str | None = None) -> dict[str, Any]:
         "Args:\n"
         "  db_path (str, optional): Path to the database file. Uses default if not provided.\n\n"
         "Returns:\n"
-        "  List of table names in the database"
+        "  List of table names in the database\n\n"
+        "Examples:\n"
+        "  list_tables()  # Uses default db_path\n"
+        "  list_tables('myapp.db')  # Specific database file\n"
+        "  list_tables('/path/to/database.db')  # Absolute path\n"
+        "  list_tables(':memory:')  # List tables in in-memory database\n"
+        "  list_tables('./data/analytics.db')  # Relative path"
     )
 )
 async def list_tables(db_path: str | None = None) -> dict[str, Any]:
@@ -274,7 +304,13 @@ async def list_tables(db_path: str | None = None) -> dict[str, Any]:
         "  table_name (str): Name of the table to describe\n"
         "  db_path (str, optional): Path to the database file. Uses default if not provided.\n\n"
         "Returns:\n"
-        "  Table schema including columns, types, and constraints"
+        "  Table schema including columns, types, and constraints\n\n"
+        "Examples:\n"
+        "  describe_table('users')  # Uses default db_path\n"
+        "  describe_table('products', 'store.db')  # Specific database\n"
+        "  describe_table('logs', '/var/log/app.db')  # Absolute path\n"
+        "  describe_table('cache', ':memory:')  # In-memory database\n"
+        "  describe_table('settings', './config/app.db')  # Relative path"
     )
 )
 async def describe_table(table_name: str, db_path: str | None = None) -> dict[str, Any]:
@@ -345,7 +381,22 @@ async def describe_table(table_name: str, db_path: str | None = None) -> dict[st
         "  {'name': 'email', 'type': 'TEXT', 'constraints': 'UNIQUE NOT NULL'}\n"
         "  {'name': 'created_at', 'type': 'TIMESTAMP', 'constraints': 'DEFAULT CURRENT_TIMESTAMP'}\n\n"
         "Returns:\n"
-        "  Success status or error message"
+        "  Success status or error message\n\n"
+        "Examples:\n"
+        "  # Uses default db_path\n"
+        "  create_table('users', [{'name': 'id', 'type': 'INTEGER', 'constraints': 'PRIMARY KEY'}])\n"
+        "  \n"
+        "  # Specific database file\n"
+        "  create_table('products', [...], 'store.db')\n"
+        "  \n"
+        "  # Absolute path\n"
+        "  create_table('logs', [...], '/var/data/app.db')\n"
+        "  \n"
+        "  # In-memory database for testing\n"
+        "  create_table('temp_data', [...], ':memory:')\n"
+        "  \n"
+        "  # Relative path\n"
+        "  create_table('settings', [...], './config/app.db')"
     )
 )
 async def create_table(
