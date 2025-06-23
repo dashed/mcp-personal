@@ -24,21 +24,21 @@ Understanding the Two-Stage Pipeline
 -----------------------------------
     Files → ripgrep (regex) → Lines → fzf (fuzzy) → Results
              ↑                         ↑
-          'pattern'                'filter'
+      'regex_pattern'           'fuzzy_filter'
 
 Common Mistakes to Avoid
 -----------------------
-1. **Using regex in the filter parameter**:
-   ❌ WRONG: filter="def test_.*credit", pattern="def test_"
-   ✅ RIGHT: filter="test credit", pattern="def test_"
+1. **Using regex in the fuzzy_filter parameter**:
+   ❌ WRONG: fuzzy_filter="def test_.*credit", regex_pattern="def test_"
+   ✅ RIGHT: fuzzy_filter="test credit", regex_pattern="def test_"
 
-2. **Using fuzzy terms in the pattern parameter**:
-   ❌ WRONG: pattern="find this text"
-   ✅ RIGHT: pattern="find.*this.*text" or pattern="find|this|text"
+2. **Using fuzzy terms in the regex_pattern parameter**:
+   ❌ WRONG: regex_pattern="find this text"
+   ✅ RIGHT: regex_pattern="find.*this.*text" or regex_pattern="find|this|text"
 
 3. **Confusing which parameter does what**:
-   - 'pattern': Regular expression for ripgrep (first stage)
-   - 'filter': Fuzzy search terms for fzf (second stage)
+   - 'regex_pattern': Regular expression for ripgrep (first stage)
+   - 'fuzzy_filter': Fuzzy search terms for fzf (second stage)
 
 Quick start
 -----------
@@ -51,7 +51,7 @@ chmod +x mcp_fuzzy_search.py
 
 # 1. CLI usage
 ./mcp_fuzzy_search.py search-files "main" src
-./mcp_fuzzy_search.py search-content "implement" . --pattern "TODO"
+./mcp_fuzzy_search.py search-content "implement" . --regex-pattern "TODO"
 ./mcp_fuzzy_search.py --examples  # Show usage examples
 
 # 2. Run as MCP server
@@ -243,7 +243,7 @@ mcp = FastMCP("fuzzy-search")
     description=(
         "Search for file paths using fuzzy matching.\n\n"
         "Args:\n"
-        "  filter (str): fzf query string with advanced syntax support. Required.\n"
+        "  fuzzy_filter (str): fzf query string with advanced syntax support. Required.\n"
         "  path   (str, optional): Directory to search. Defaults to current dir.\n"
         "  hidden (bool, optional): Include hidden files. Default false.\n"
         "  limit  (int, optional): Max results to return. Default 20.\n"
@@ -277,25 +277,25 @@ mcp = FastMCP("fuzzy-search")
     )
 )
 def fuzzy_search_files(
-    filter: str,
+    fuzzy_filter: str,
     path: str = ".",
     hidden: bool = False,
     limit: int = 20,
     multiline: bool = False,
 ) -> dict[str, Any]:
     """Find files using ripgrep + fzf fuzzy filtering with optional multiline content search."""
-    if not filter:
-        return {"error": "'filter' argument is required"}
+    if not fuzzy_filter:
+        return {"error": "'fuzzy_filter' argument is required"}
 
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
     # Check for potential parameter misuse
     warnings = []
-    if _looks_like_regex(filter):
-        suggested_terms = _suggest_fuzzy_terms(filter)
+    if _looks_like_regex(fuzzy_filter):
+        suggested_terms = _suggest_fuzzy_terms(fuzzy_filter)
         warnings.append(
-            f"The 'filter' parameter contains regex-like patterns ({filter!r}). "
+            f"The 'fuzzy_filter' parameter contains regex-like patterns ({fuzzy_filter!r}). "
             f"This parameter expects fuzzy search terms, not regex. "
             f"Try: {suggested_terms!r}"
         )
@@ -334,7 +334,13 @@ def fuzzy_search_files(
                 return {"matches": []}
 
             # Use fzf with multiline support
-            fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
+            fzf_cmd: list[str] = [
+                fzf_bin,
+                "--filter",
+                fuzzy_filter,
+                "--read0",
+                "--print0",
+            ]
 
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
@@ -362,7 +368,7 @@ def fuzzy_search_files(
             rg_cmd.append(search_path)
 
             # Pipe through fzf for fuzzy filtering
-            fzf_cmd: list[str] = [fzf_bin, "--filter", filter]
+            fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter]
 
             logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
@@ -404,27 +410,27 @@ def fuzzy_search_files(
         "Search file contents using a two-stage pipeline:\n\n"
         "    Files → ripgrep (regex) → Lines → fzf (fuzzy) → Results\n"
         "             ↑                         ↑\n"
-        "          'pattern'                'filter'\n\n"
+        "      'regex_pattern'           'fuzzy_filter'\n\n"
         "CORRECT USAGE:\n"
-        '  ✓ pattern: "TODO|FIXME"      filter: "implement database"\n'
-        '  ✓ pattern: "def test_"       filter: "seer credit"\n'
-        '  ✓ pattern: "class"           filter: "Model save"\n\n'
+        '  ✓ regex_pattern: "TODO|FIXME"      fuzzy_filter: "implement database"\n'
+        '  ✓ regex_pattern: "def test_"       fuzzy_filter: "seer credit"\n'
+        '  ✓ regex_pattern: "class"           fuzzy_filter: "Model save"\n\n'
         "INCORRECT USAGE (Common Mistakes):\n"
-        '  ✗ pattern: "def test_.*seer" filter: "def test_.*seer"  # Don\'t use regex in filter!\n'
-        '  ✗ pattern: "find this text"  filter: "find this text"   # Pattern needs regex syntax\n\n'
+        '  ✗ regex_pattern: "def test_.*seer" fuzzy_filter: "def test_.*seer"  # Don\'t use regex in filter!\n'
+        '  ✗ regex_pattern: "find this text"  fuzzy_filter: "find this text"   # Pattern needs regex syntax\n\n'
         "Args:\n"
-        "  filter  (str): fzf fuzzy search query. NOT regex! Required.\n"
+        "  fuzzy_filter  (str): fzf fuzzy search query. NOT regex! Required.\n"
         "  path    (str, optional): Directory/file to search. Defaults to current dir.\n"
-        "  pattern (str, optional): Regex pattern for ripgrep. Default '.' (all lines).\n"
+        "  regex_pattern (str, optional): Regex pattern for ripgrep. Default '.' (all lines).\n"
         "  hidden  (bool, optional): Search hidden files. Default false.\n"
         "  limit   (int, optional): Max results to return. Default 20.\n"
         "  rg_flags (str, optional): Extra flags for ripgrep.\n"
         "  multiline (bool, optional): Enable multiline record processing. Default false.\n\n"
         "Understanding the Two-Stage Process:\n"
-        "  1. PATTERN (ripgrep): Finds lines matching regex\n"
+        "  1. REGEX_PATTERN (ripgrep): Finds lines matching regex\n"
         "     - Uses regular expressions\n"
         '     - Examples: "TODO", "def \\w+\\(", "import.*pandas"\n'
-        "  2. FILTER (fzf): Fuzzy filters the results\n"
+        "  2. FUZZY_FILTER (fzf): Fuzzy filters the results\n"
         "     - Uses fuzzy matching on 'file:line:content' format\n"
         '     - Examples: "database save", "test user auth"\n\n'
         "fzf Filter Syntax (Fuzzy Matching):\n"
@@ -448,36 +454,36 @@ def fuzzy_search_files(
         "  Examples: '-i -C 2', '-t py --no-ignore', '-F -w'\n\n"
         "Examples:\n"
         "  1. Find TODO comments about databases:\n"
-        '     pattern="TODO" filter="database"\n'
+        '     regex_pattern="TODO" fuzzy_filter="database"\n'
         "  2. Find test functions mentioning 'seer' and 'credit':\n"
-        '     pattern="def test_" filter="seer credit"\n'
+        '     regex_pattern="def test_" fuzzy_filter="seer credit"\n'
         "  3. Find all async functions with error handling:\n"
-        '     pattern="async def" filter="error try except"\n\n'
+        '     regex_pattern="async def" fuzzy_filter="error try except"\n\n'
         "Returns: { matches: Array<{file: string, line: number, content: string}> } or { error: string }"
     )
 )
 def fuzzy_search_content(
-    filter: str,
+    fuzzy_filter: str,
     path: str = ".",
-    pattern: str = ".",
+    regex_pattern: str = ".",
     hidden: bool = False,
     limit: int = 20,
     rg_flags: str = "",
     multiline: bool = False,
 ) -> dict[str, Any]:
     """Search all content then apply fuzzy filtering - similar to 'rg . | fzf'."""
-    if not filter:
-        return {"error": "'filter' argument is required"}
+    if not fuzzy_filter:
+        return {"error": "'fuzzy_filter' argument is required"}
 
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
     # Check for potential parameter misuse
     warnings = []
-    if _looks_like_regex(filter):
-        suggested_terms = _suggest_fuzzy_terms(filter)
+    if _looks_like_regex(fuzzy_filter):
+        suggested_terms = _suggest_fuzzy_terms(fuzzy_filter)
         warnings.append(
-            f"The 'filter' parameter contains regex-like patterns ({filter!r}). "
+            f"The 'fuzzy_filter' parameter contains regex-like patterns ({fuzzy_filter!r}). "
             f"This parameter expects fuzzy search terms, not regex. "
             f"Try: {suggested_terms!r}"
         )
@@ -519,18 +525,20 @@ def fuzzy_search_content(
                     with path_obj.open("rb") as f:
                         content = f.read()
                         # Only include files that match the pattern if not default
-                        if pattern != ".":
+                        if regex_pattern != ".":
                             # Quick check if pattern matches in content
                             try:
                                 import re
 
                                 if not re.search(
-                                    pattern.encode("utf-8"), content, re.IGNORECASE
+                                    regex_pattern.encode("utf-8"),
+                                    content,
+                                    re.IGNORECASE,
                                 ):
                                     continue
                             except re.error:
                                 # If pattern is invalid regex, treat as literal
-                                if pattern.encode("utf-8") not in content:
+                                if regex_pattern.encode("utf-8") not in content:
                                     continue
 
                         # Create record: filename + content + null separator
@@ -544,7 +552,13 @@ def fuzzy_search_content(
                 return {"matches": []}
 
             # Use fzf with multiline support
-            fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
+            fzf_cmd: list[str] = [
+                fzf_bin,
+                "--filter",
+                fuzzy_filter,
+                "--read0",
+                "--print0",
+            ]
 
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
@@ -587,10 +601,10 @@ def fuzzy_search_content(
                 rg_cmd.extend(shlex.split(rg_flags))
             # Ensure path is properly formatted
             search_path = str(Path(path).resolve())
-            rg_cmd.extend([pattern, search_path])
+            rg_cmd.extend([regex_pattern, search_path])
 
             # Pipe through fzf for fuzzy filtering
-            fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--delimiter", ":"]
+            fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter, "--delimiter", ":"]
 
             logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
@@ -641,19 +655,19 @@ def fuzzy_search_content(
 
         if not matches and not multiline:
             # Run diagnostic check to see if ripgrep found anything
-            rg_match_count = _run_ripgrep_only(pattern, path, hidden, rg_flags)
+            rg_match_count = _run_ripgrep_only(regex_pattern, path, hidden, rg_flags)
             if rg_match_count == 0:
                 result["diagnostic"] = (
-                    f"ripgrep found 0 matches for pattern '{pattern}'. "
+                    f"ripgrep found 0 matches for pattern '{regex_pattern}'. "
                     f"Check if your regex pattern is correct."
                 )
             else:
                 result["diagnostic"] = (
-                    f"ripgrep found {rg_match_count} matches for pattern '{pattern}', "
-                    f"but fzf filter '{filter}' matched none. "
+                    f"ripgrep found {rg_match_count} matches for pattern '{regex_pattern}', "
+                    f"but fzf filter '{fuzzy_filter}' matched none. "
                 )
-                if _looks_like_regex(filter):
-                    suggested = _suggest_fuzzy_terms(filter)
+                if _looks_like_regex(fuzzy_filter):
+                    suggested = _suggest_fuzzy_terms(fuzzy_filter)
                     result["diagnostic"] += f"\nTry fuzzy terms like: '{suggested}'"
                 else:
                     result["diagnostic"] += (
@@ -679,19 +693,19 @@ FUZZY SEARCH EXAMPLES
 ====================
 
 1. Find TODO comments about databases:
-   $ ./mcp_fuzzy_search.py search-content "database" --pattern "TODO"
+   $ ./mcp_fuzzy_search.py search-content "database" --regex-pattern "TODO"
 
 2. Find test functions mentioning 'seer' and 'credit':
-   $ ./mcp_fuzzy_search.py search-content "seer credit" --pattern "def test_"
+   $ ./mcp_fuzzy_search.py search-content "seer credit" --regex-pattern "def test_"
 
 3. Find Python files in src directory:
    $ ./mcp_fuzzy_search.py search-files "src py$"
 
 4. Find all async functions with error handling:
-   $ ./mcp_fuzzy_search.py search-content "error try except" --pattern "async def"
+   $ ./mcp_fuzzy_search.py search-content "error try except" --regex-pattern "async def"
 
 5. Search with case-insensitive matching:
-   $ ./mcp_fuzzy_search.py search-content "config" --pattern "CONFIG" --rg-flags "-i"
+   $ ./mcp_fuzzy_search.py search-content "config" --regex-pattern "CONFIG" --rg-flags "-i"
 
 COMMON MISTAKES TO AVOID
 ========================
@@ -700,18 +714,18 @@ COMMON MISTAKES TO AVOID
   $ ./mcp_fuzzy_search.py search-content "def test_.*seer.*credit"
 
 ✓ DO use fuzzy search terms instead:
-  $ ./mcp_fuzzy_search.py search-content "test seer credit" --pattern "def test_"
+  $ ./mcp_fuzzy_search.py search-content "test seer credit" --regex-pattern "def test_"
 
 ✗ DON'T confuse the parameters:
-  filter: For fuzzy matching (space-separated terms)
-  pattern: For regex matching (regular expressions)
+  fuzzy_filter: For fuzzy matching (space-separated terms)
+  regex_pattern: For regex matching (regular expressions)
 
 UNDERSTANDING THE PIPELINE
 =========================
 
-Files → ripgrep (--pattern) → Lines → fzf (filter) → Results
-         ↑                              ↑
-      regex search                 fuzzy filter
+Files → ripgrep (--regex-pattern) → Lines → fzf (fuzzy_filter) → Results
+         ↑                                    ↑
+      regex search                       fuzzy filter
 """
     print(examples)
 
@@ -733,7 +747,7 @@ def _cli() -> None:
 
     # search-files subcommand
     p_files = sub.add_parser("search-files", help="Fuzzy search file paths")
-    p_files.add_argument("filter", help="fzf query: 'config .json$ !test'")
+    p_files.add_argument("fuzzy_filter", help="fzf query: 'config .json$ !test'")
     p_files.add_argument("path", nargs="?", default=".", help="Directory to search")
     p_files.add_argument("--hidden", action="store_true", help="Include hidden files")
     p_files.add_argument("--limit", type=int, default=20, help="Max results")
@@ -745,12 +759,14 @@ def _cli() -> None:
     p_content = sub.add_parser(
         "search-content", help="Search all content with fuzzy filter"
     )
-    p_content.add_argument("filter", help="fzf query: 'TODO implement .py: !test'")
+    p_content.add_argument(
+        "fuzzy_filter", help="fzf query: 'TODO implement .py: !test'"
+    )
     p_content.add_argument(
         "path", nargs="?", default=".", help="Directory/file to search"
     )
     p_content.add_argument(
-        "--pattern", default=".", help="Ripgrep pattern (default: all lines)"
+        "--regex-pattern", default=".", help="Ripgrep pattern (default: all lines)"
     )
     p_content.add_argument("--hidden", action="store_true", help="Search hidden files")
     p_content.add_argument("--limit", type=int, default=20, help="Max results")
@@ -771,12 +787,14 @@ def _cli() -> None:
         parser.error("Please specify a subcommand or use --examples")
 
     if ns.cmd == "search-files":
-        res = fuzzy_search_files(ns.filter, ns.path, ns.hidden, ns.limit, ns.multiline)
+        res = fuzzy_search_files(
+            ns.fuzzy_filter, ns.path, ns.hidden, ns.limit, ns.multiline
+        )
     else:
         res = fuzzy_search_content(
-            ns.filter,
+            ns.fuzzy_filter,
             ns.path,
-            ns.pattern,
+            ns.regex_pattern,
             ns.hidden,
             ns.limit,
             ns.rg_flags,

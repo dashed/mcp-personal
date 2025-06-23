@@ -42,7 +42,7 @@ async def test_fuzzy_search_files(tmp_path: Path):
 
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         result = await client.call_tool(
-            "fuzzy_search_files", {"filter": "main", "path": str(tmp_path)}
+            "fuzzy_search_files", {"fuzzy_filter": "main", "path": str(tmp_path)}
         )
 
         # Parse result
@@ -64,14 +64,14 @@ async def test_fuzzy_search_files_with_hidden(tmp_path: Path):
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         # Without hidden flag
         result_no_hidden = await client.call_tool(
-            "fuzzy_search_files", {"filter": "config", "path": str(tmp_path)}
+            "fuzzy_search_files", {"fuzzy_filter": "config", "path": str(tmp_path)}
         )
         data_no_hidden = json.loads(result_no_hidden.content[0].text)
 
         # With hidden flag
         result_with_hidden = await client.call_tool(
             "fuzzy_search_files",
-            {"filter": "config", "path": str(tmp_path), "hidden": True},
+            {"fuzzy_filter": "config", "path": str(tmp_path), "hidden": True},
         )
         data_with_hidden = json.loads(result_with_hidden.content[0].text)
 
@@ -104,7 +104,11 @@ def main():
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         result = await client.call_tool(
             "fuzzy_search_content",
-            {"filter": "implement", "path": str(tmp_path), "pattern": "TODO"},
+            {
+                "fuzzy_filter": "implement",
+                "path": str(tmp_path),
+                "regex_pattern": "TODO",
+            },
         )
 
         # Parse result
@@ -132,7 +136,12 @@ async def test_fuzzy_search_content_with_limit(tmp_path: Path):
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         result = await client.call_tool(
             "fuzzy_search_content",
-            {"filter": "task", "path": str(tmp_path), "pattern": "TODO", "limit": 5},
+            {
+                "fuzzy_filter": "task",
+                "path": str(tmp_path),
+                "regex_pattern": "TODO",
+                "limit": 5,
+            },
         )
 
         data = json.loads(result.content[0].text)
@@ -155,7 +164,7 @@ def function():
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         result = await client.call_tool(
             "fuzzy_search_content",
-            {"filter": "function", "path": str(tmp_path)},  # No pattern specified
+            {"fuzzy_filter": "function", "path": str(tmp_path)},  # No pattern specified
         )
 
         data = json.loads(result.content[0].text)
@@ -177,14 +186,14 @@ async def test_fuzzy_search_content_with_hidden(tmp_path: Path):
         # Without hidden flag
         result_no_hidden = await client.call_tool(
             "fuzzy_search_content",
-            {"filter": "SECRET", "path": str(tmp_path)},
+            {"fuzzy_filter": "SECRET", "path": str(tmp_path)},
         )
         data_no_hidden = json.loads(result_no_hidden.content[0].text)
 
         # With hidden flag
         result_with_hidden = await client.call_tool(
             "fuzzy_search_content",
-            {"filter": "SECRET", "path": str(tmp_path), "hidden": True},
+            {"fuzzy_filter": "SECRET", "path": str(tmp_path), "hidden": True},
         )
         data_with_hidden = json.loads(result_with_hidden.content[0].text)
 
@@ -211,8 +220,8 @@ async def test_warns_on_regex_in_filter(tmp_path: Path):
         result = await client.call_tool(
             "fuzzy_search_content",
             {
-                "filter": "def test_.*seer.*credit",  # Regex in wrong parameter
-                "pattern": "def test_",
+                "fuzzy_filter": "def test_.*seer.*credit",  # Regex in wrong parameter
+                "regex_pattern": "def test_",
                 "path": str(tmp_path),
             },
         )
@@ -237,8 +246,8 @@ async def test_diagnostic_messages_no_matches(tmp_path: Path):
         result = await client.call_tool(
             "fuzzy_search_content",
             {
-                "filter": "something",
-                "pattern": "nonexistent_pattern",
+                "fuzzy_filter": "something",
+                "regex_pattern": "nonexistent_pattern",
                 "path": str(tmp_path),
             },
         )
@@ -251,7 +260,11 @@ async def test_diagnostic_messages_no_matches(tmp_path: Path):
         # Test 2: Pattern finds matches but filter doesn't match
         result = await client.call_tool(
             "fuzzy_search_content",
-            {"filter": "nonexistent", "pattern": "def", "path": str(tmp_path)},
+            {
+                "fuzzy_filter": "nonexistent",
+                "regex_pattern": "def",
+                "path": str(tmp_path),
+            },
         )
 
         data = json.loads(result.content[0].text)
@@ -274,7 +287,7 @@ async def test_fuzzy_search_files_regex_warning(tmp_path: Path):
         result = await client.call_tool(
             "fuzzy_search_files",
             {
-                "filter": ".*\\.py$",  # Regex pattern
+                "fuzzy_filter": ".*\\.py$",  # Regex pattern
                 "path": str(tmp_path),
             },
         )
@@ -317,9 +330,9 @@ async def test_fuzzy_search_content_case_sensitive(tmp_path: Path):
         result = await client.call_tool(
             "fuzzy_search_content",
             {
-                "filter": "error",
+                "fuzzy_filter": "error",
                 "path": str(tmp_path),
-                "pattern": "error",
+                "regex_pattern": "error",
                 "rg_flags": "-i",  # Case insensitive
             },
         )
@@ -334,16 +347,16 @@ async def test_error_handling():
     """Test error handling for missing arguments."""
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         # Missing filter for fuzzy_search_files
-        result = await client.call_tool("fuzzy_search_files", {"filter": ""})
+        result = await client.call_tool("fuzzy_search_files", {"fuzzy_filter": ""})
         data = json.loads(result.content[0].text)
         assert "error" in data
-        assert "'filter' argument is required" in data["error"]
+        assert "'fuzzy_filter' argument is required" in data["error"]
 
         # Missing filter for fuzzy_search_content
-        result = await client.call_tool("fuzzy_search_content", {"filter": ""})
+        result = await client.call_tool("fuzzy_search_content", {"fuzzy_filter": ""})
         data = json.loads(result.content[0].text)
         assert "error" in data
-        assert "'filter' argument is required" in data["error"]
+        assert "'fuzzy_filter' argument is required" in data["error"]
 
 
 async def test_list_tools():
@@ -359,14 +372,14 @@ async def test_list_tools():
 
         # Verify metadata
         assert files_tool.description and "fuzzy matching" in files_tool.description
-        assert "filter" in files_tool.inputSchema["required"]
+        assert "fuzzy_filter" in files_tool.inputSchema["required"]
 
         assert (
             content_tool.description
             and "Search file contents using a two-stage pipeline"
             in content_tool.description
         )
-        assert "filter" in content_tool.inputSchema["required"]
+        assert "fuzzy_filter" in content_tool.inputSchema["required"]
 
 
 def test_cli_search_files(tmp_path: Path):
@@ -401,7 +414,7 @@ def test_cli_search_content(tmp_path: Path):
             "search-content",
             "implement",
             str(tmp_path),
-            "--pattern",
+            "--regex-pattern",
             "TODO",
         ],
         capture_output=True,
@@ -476,7 +489,7 @@ async def test_fuzzy_search_files_mocked(mock_popen):
     ):
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
             result = await client.call_tool(
-                "fuzzy_search_files", {"filter": "main", "path": "."}
+                "fuzzy_search_files", {"fuzzy_filter": "main", "path": "."}
             )
 
             data = json.loads(result.content[0].text)
@@ -511,7 +524,7 @@ async def test_fuzzy_search_content_mocked(mock_popen):
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
             result = await client.call_tool(
                 "fuzzy_search_content",
-                {"filter": "implement", "path": ".", "pattern": "TODO"},
+                {"fuzzy_filter": "implement", "path": ".", "regex_pattern": "TODO"},
             )
 
             data = json.loads(result.content[0].text)
@@ -710,7 +723,7 @@ async def test_fuzzy_search_files_multiline_mcp():
 
             async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
                 result = await client.call_tool(
-                    "fuzzy_search_files", {"filter": "async", "multiline": True}
+                    "fuzzy_search_files", {"fuzzy_filter": "async", "multiline": True}
                 )
 
                 data = json.loads(result.content[0].text)
@@ -761,7 +774,7 @@ async def test_fuzzy_search_content_multiline_mcp():
 
             async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
                 result = await client.call_tool(
-                    "fuzzy_search_content", {"filter": "class", "multiline": True}
+                    "fuzzy_search_content", {"fuzzy_filter": "class", "multiline": True}
                 )
 
                 data = json.loads(result.content[0].text)
