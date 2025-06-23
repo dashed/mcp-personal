@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -155,7 +156,7 @@ def test_db():
 def run_cli_command(command: list[str]) -> dict:
     """Run a CLI command and return the JSON output."""
     result = subprocess.run(
-        ["./mcp_sqlite_server.py"] + command,
+        [sys.executable, "mcp_sqlite_server.py"] + command,
         capture_output=True,
         text=True,
     )
@@ -220,7 +221,7 @@ def test_write_operations_disabled_by_default():
     # this through the server interface. For now, we'll just verify the
     # server starts correctly.
     result = subprocess.run(
-        ["./mcp_sqlite_server.py", "--help"],
+        [sys.executable, "mcp_sqlite_server.py", "--help"],
         capture_output=True,
         text=True,
     )
