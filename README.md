@@ -14,8 +14,9 @@ Powerful file search capabilities using `fd` and `fzf`:
 
 ### 2. Fuzzy Search Server (`mcp_fuzzy_search.py`)
 Advanced content search using `ripgrep` and `fzf`:
-- **Content search** using `ripgrep` for fast text searching across files
+- **Content search** using `ripgrep` to search all lines in files
 - **Fuzzy filtering** of search results using `fzf --filter`
+- **Simplified interface** - just provide fuzzy search terms, no regex required
 - **Multiline record processing** for complex pattern matching
 - **Non-interactive** operation perfect for MCP integration
 - **File path fuzzy search** for finding files by name patterns
@@ -292,6 +293,8 @@ Once configured in Claude Desktop, you can use natural language for advanced sea
 - "Find all files with 'test' in the name using fuzzy search"
 - "Look for error handling code in Python files"
 - "Search for configuration files containing database settings"
+- "Find method definitions named 'update_ondemand_max_spend'"
+- "Search for async functions with error handling"
 
 #### CLI Usage
 
@@ -303,8 +306,8 @@ The fuzzy search server also works as a standalone CLI tool:
 ./mcp_fuzzy_search.py search-files "test" . --hidden --limit 10
 
 # Search all content and filter with fzf (like 'rg . | fzf')
-./mcp_fuzzy_search.py search-content "implement" . --pattern "TODO"
-./mcp_fuzzy_search.py search-content "handle" src --pattern "error|exception" --rg-flags "-i"
+./mcp_fuzzy_search.py search-content "TODO implement" .
+./mcp_fuzzy_search.py search-content "error handle" src --rg-flags "-i"
 
 # Multiline content search - treat each file as a single record
 ./mcp_fuzzy_search.py search-files "class.*constructor" src --multiline
@@ -497,46 +500,46 @@ The `fuzzy_search_content` tool accepts `rg_flags` for enhanced searching. Here 
 
 ### File Type Filtering
 | Flag | Description | Example |
-|------|-------------|---------|
-| `-t TYPE` | Only search specific file types | `rg -t py "class"` searches Python files only |
-| `-T TYPE` | Exclude specific file types | `rg -T test "function"` excludes test files |
+|------|-------------|---------| 
+| `-t TYPE` | Only search specific file types | `-t py` searches Python files only |
+| `-T TYPE` | Exclude specific file types | `-T test` excludes test files |
 | `--type-list` | Show all supported file types | `rg --type-list` |
 
 ### Context Lines
 | Flag | Description | Example |
-|------|-------------|---------|
-| `-A NUM` | Show NUM lines after match | `rg -A 3 "TODO"` shows 3 lines after |
-| `-B NUM` | Show NUM lines before match | `rg -B 2 "class"` shows 2 lines before |
-| `-C NUM` | Show NUM lines before and after | `rg -C 3 "function"` shows 3 lines both sides |
+|------|-------------|---------| 
+| `-A NUM` | Show NUM lines after match | `-A 3` shows 3 lines after |
+| `-B NUM` | Show NUM lines before match | `-B 2` shows 2 lines before |
+| `-C NUM` | Show NUM lines before and after | `-C 3` shows 3 lines both sides |
 
 ### File Handling
 | Flag | Description | Example |
-|------|-------------|---------|
-| `-.` | Search hidden files/directories | `rg -. "config"` includes .hidden files |
-| `--no-ignore` | Ignore .gitignore rules | `rg --no-ignore "debug"` searches ignored files |
-| `-u` | Reduce filtering (1-3 times) | `rg -uu "pattern"` = `--no-ignore --hidden` |
+|------|-------------|---------| 
+| `--hidden` | Search hidden files/directories | `--hidden` includes .hidden files |
+| `--no-ignore` | Ignore .gitignore rules | `--no-ignore` searches ignored files |
+| `-u` | Reduce filtering (1-3 times) | `-uu` = `--no-ignore --hidden` |
 
 ### Pattern Matching
 | Flag | Description | Example |
-|------|-------------|---------|
-| `-F` | Literal string search (no regex) | `rg -F "func()"` searches for exact text |
-| `-w` | Match whole words only | `rg -w "test"` won't match "testing" |
-| `-v` | Invert match (show non-matches) | `rg -v "TODO"` shows lines without TODO |
-| `-x` | Match entire lines only | `rg -x "import os"` matches exact line |
+|------|-------------|---------| 
+| `-F` | Literal string search (no regex) | `-F` searches for exact text |
+| `-w` | Match whole words only | `-w` won't match partial words |
+| `-v` | Invert match (show non-matches) | `-v` shows lines without matches |
+| `-x` | Match entire lines only | `-x` matches exact line |
 
 ### Advanced Features
 | Flag | Description | Example |
-|------|-------------|---------|
-| `-U` | Enable multiline matching | `rg -U "class.*{.*}"` spans multiple lines |
-| `-P` | Use PCRE2 regex engine | `rg -P "(?<=def )\\w+"` uses lookbehind |
-| `-o` | Show only matching parts | `rg -o "\\w+@\\w+\\.com"` shows just emails |
+|------|-------------|---------| 
+| `-U` | Enable multiline matching | `-U` (note: use multiline parameter instead) |
+| `-P` | Use PCRE2 regex engine | `-P` for advanced regex features |
+| `-o` | Show only matching parts | `-o` shows just matching text |
 
 ### Output Control
 | Flag | Description | Example |
-|------|-------------|---------|
-| `-c` | Count matches per file | `rg -c "TODO"` shows count only |
-| `-l` | Show only filenames with matches | `rg -l "class"` lists files containing class |
-| `--column` | Show column numbers | `rg --column "function"` includes column info |
+|------|-------------|---------| 
+| `-c` | Count matches per file | `-c` shows count only |
+| `-l` | Show only filenames with matches | `-l` lists files with matches |
+| `--column` | Show column numbers | `--column` includes column info |
 
 ### Practical Combinations
 
@@ -646,23 +649,21 @@ Search for file paths using fuzzy matching.
 ```
 
 #### `fuzzy_search_content`
-Search all file contents (like 'rg . | fzf'), then apply fuzzy filtering.
+Search all file contents using fuzzy filtering.
 
 **Parameters:**
-- `filter` (required): Fuzzy filter string for results
+- `fuzzy_filter` (required): Fuzzy search query for filtering results
 - `path` (optional): Directory/file to search in (defaults to current directory)
-- `pattern` (optional): Regex pattern for ripgrep (default: '.' - all lines)
 - `hidden` (optional): Search hidden files (default: false)
 - `limit` (optional): Maximum results to return (default: 20)
-- `rg_flags` (optional): Extra flags for ripgrep
+- `rg_flags` (optional): Extra flags for ripgrep (see ripgrep flags reference)
 - `multiline` (optional): Enable multiline record processing (default: false)
 
 **Example:**
 ```python
 {
-  "filter": "implement",
+  "fuzzy_filter": "TODO implement",
   "path": "./src",
-  "pattern": "TODO|FIXME",
   "rg_flags": "-i",
   "limit": 15
 }
@@ -671,9 +672,8 @@ Search all file contents (like 'rg . | fzf'), then apply fuzzy filtering.
 **Multiline Example:**
 ```python
 {
-  "filter": "async.*await.*catch",
+  "fuzzy_filter": "async.*await.*catch",
   "path": "./src",
-  "pattern": ".",
   "multiline": true,
   "limit": 10
 }
@@ -923,7 +923,7 @@ This project is open source and available under the [MIT License](LICENSE).
 - [fzf](https://github.com/junegunn/fzf) - A command-line fuzzy finder
 
 ### Fuzzy Search Server
-- [ripgrep](https://github.com/BurntSushi/ripgrep) - Recursively search directories for a regex pattern
+- [ripgrep](https://github.com/BurntSushi/ripgrep) - Recursively search directories for text patterns
 - [fzf](https://github.com/junegunn/fzf) - A command-line fuzzy finder
 
 ### SQLite Server
