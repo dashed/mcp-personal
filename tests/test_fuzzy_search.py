@@ -197,6 +197,119 @@ async def test_fuzzy_search_content_with_rg_flags(tmp_path: Path):
     _skip_if_missing("rg")
     _skip_if_missing("fzf")
 
+
+async def test_warns_on_regex_in_filter(tmp_path: Path):
+    """Test that using regex in filter parameter provides helpful guidance."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Create test file
+    (tmp_path / "test_file.py").write_text("def test_seer_credit():\n    pass")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        # Test with regex pattern in filter (incorrect usage)
+        result = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "filter": "def test_.*seer.*credit",  # Regex in wrong parameter
+                "pattern": "def test_",
+                "path": str(tmp_path),
+            },
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "warnings" in data
+        assert "regex-like patterns" in data["warnings"][0]
+        assert "Try:" in data["warnings"][0]
+
+
+async def test_diagnostic_messages_no_matches(tmp_path: Path):
+    """Test diagnostic messages when no matches are found."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Create test files
+    (tmp_path / "file1.py").write_text("def hello():\n    print('world')")
+    (tmp_path / "file2.py").write_text("class MyClass:\n    pass")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        # Test 1: Pattern finds nothing
+        result = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "filter": "something",
+                "pattern": "nonexistent_pattern",
+                "path": str(tmp_path),
+            },
+        )
+
+        data = json.loads(result.content[0].text)
+        assert len(data["matches"]) == 0
+        assert "diagnostic" in data
+        assert "ripgrep found 0 matches" in data["diagnostic"]
+
+        # Test 2: Pattern finds matches but filter doesn't match
+        result = await client.call_tool(
+            "fuzzy_search_content",
+            {"filter": "nonexistent", "pattern": "def", "path": str(tmp_path)},
+        )
+
+        data = json.loads(result.content[0].text)
+        assert len(data["matches"]) == 0
+        assert "diagnostic" in data
+        assert "ripgrep found" in data["diagnostic"]
+        assert "but fzf filter" in data["diagnostic"]
+
+
+async def test_fuzzy_search_files_regex_warning(tmp_path: Path):
+    """Test that fuzzy_search_files warns about regex in filter."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Create test files
+    (tmp_path / "main.py").write_text("# main")
+    (tmp_path / "test_main.py").write_text("# test")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "fuzzy_search_files",
+            {
+                "filter": ".*\\.py$",  # Regex pattern
+                "path": str(tmp_path),
+            },
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "warnings" in data
+        assert "regex-like patterns" in data["warnings"][0]
+
+
+async def test_helper_functions():
+    """Test the regex detection and suggestion helper functions."""
+    # Test regex detection
+    assert mcp_fuzzy_search._looks_like_regex("def test_.*seer.*credit")
+    assert mcp_fuzzy_search._looks_like_regex(".*\\.py$")
+    assert mcp_fuzzy_search._looks_like_regex("^src/.*")
+    assert mcp_fuzzy_search._looks_like_regex("\\w+")
+    assert not mcp_fuzzy_search._looks_like_regex("simple search terms")
+    assert not mcp_fuzzy_search._looks_like_regex("TODO implement")
+
+    # Test fuzzy term suggestions
+    assert (
+        mcp_fuzzy_search._suggest_fuzzy_terms("def test_.*seer.*credit")
+        == "def test seer credit"
+    )
+    assert mcp_fuzzy_search._suggest_fuzzy_terms("^src/.*\\.py$") == "src/ py"
+    assert (
+        mcp_fuzzy_search._suggest_fuzzy_terms("TODO|FIXME") == "TODO|FIXME"
+    )  # Keeps pipe for OR
+
+
+async def test_fuzzy_search_content_case_sensitive(tmp_path: Path):
+    """Test fuzzy_search_content with case-sensitive matching."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
     # Create test file with case-sensitive content
     (tmp_path / "case.py").write_text("ERROR: something failed\nerror: minor issue")
 
@@ -250,7 +363,8 @@ async def test_list_tools():
 
         assert (
             content_tool.description
-            and "Search all file contents" in content_tool.description
+            and "Search file contents using a two-stage pipeline"
+            in content_tool.description
         )
         assert "filter" in content_tool.inputSchema["required"]
 

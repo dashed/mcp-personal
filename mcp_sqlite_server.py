@@ -218,11 +218,11 @@ async def query(query: str, db_path: str | None = None) -> dict[str, Any]:
         "Returns:\n"
         "  Success status with affected row count, or error message\n\n"
         "Examples:\n"
-        "  execute('INSERT INTO users (name, email) VALUES (\"John\", \"john@example.com\")')  # Uses default db_path\n"
+        '  execute(\'INSERT INTO users (name, email) VALUES ("John", "john@example.com")\')  # Uses default db_path\n'
         "  execute('INSERT INTO logs (message) VALUES (\"Started\")', 'app.db')  # Specific database\n"
         "  execute('UPDATE users SET active = 0 WHERE id = 5', '/var/data/users.db')  # Absolute path\n"
         "  execute('UPDATE settings SET value = \"dark\" WHERE key = \"theme\"', ':memory:')  # In-memory database\n"
-        '  execute(\'UPDATE users SET active = 0 WHERE last_login < date("now", "-1 year")\', \'users.db\')\n'
+        "  execute('UPDATE users SET active = 0 WHERE last_login < date(\"now\", \"-1 year\")', 'users.db')\n"
         "  execute('DELETE FROM sessions WHERE expired = 1', 'sessions.db')"
     )
 )
