@@ -21,8 +21,14 @@ Advanced content search using `ripgrep` and `fzf`:
 - **File path fuzzy search** for finding files by name patterns
 - **Standalone CLI** for testing and direct usage
 
-### More servers coming soon...
-This repository will grow to include additional MCP servers for various tasks.
+### 3. SQLite Server (`mcp_sqlite_server.py`)
+SQLite database operations with configurable read/write permissions:
+- **Read-only by default** - Write operations disabled unless explicitly enabled
+- **Agent-friendly** - Clear tool descriptions and examples for easy AI agent usage
+- **In-memory database support** - Use `:memory:` for temporary databases
+- **Comprehensive operations** - Query, execute, list tables, describe schema, create tables
+- **Safety features** - Query validation, write operation restrictions, clear error messages
+- **Standalone CLI** for testing and direct usage
 
 ## Prerequisites
 
@@ -92,14 +98,23 @@ claude mcp add sequential-thinking -s user -- npx -y @modelcontextprotocol/serve
 cd /path/to/mcp-personal
 claude mcp add file-search -s user -- $(pwd)/mcp_fd_server.py
 claude mcp add fuzzy-search -s user -- $(pwd)/mcp_fuzzy_search.py
+claude mcp add sqlite -s user -- $(pwd)/mcp_sqlite_server.py
 
 # Or use relative paths (also from project directory)
 claude mcp add file-search -s user -- ./mcp_fd_server.py
 claude mcp add fuzzy-search -s user -- ./mcp_fuzzy_search.py
+claude mcp add sqlite -s user -- ./mcp_sqlite_server.py
 
 # Using absolute paths (works from anywhere)
 claude mcp add file-search -s user -- /path/to/mcp-personal/mcp_fd_server.py
 claude mcp add fuzzy-search -s user -- /path/to/mcp-personal/mcp_fuzzy_search.py
+claude mcp add sqlite -s user -- /path/to/mcp-personal/mcp_sqlite_server.py
+
+# Add SQLite server with write permissions enabled
+claude mcp add sqlite -s user -- /path/to/mcp-personal/mcp_sqlite_server.py --allow-writes
+
+# Or using environment variable
+claude mcp add sqlite -s user -e MCP_SQLITE_ALLOW_WRITES=true -- /path/to/mcp-personal/mcp_sqlite_server.py
 
 # Add Python servers with Python interpreter explicitly
 claude mcp add my-server -s user -- python /path/to/my_mcp_server.py
@@ -134,8 +149,14 @@ For Claude Desktop, manually add servers to `~/Library/Application Support/Claud
     },
     "fuzzy-search": {
       "command": "/path/to/mcp-personal/mcp_fuzzy_search.py"
+    },
+    "sqlite": {
+      "command": "/path/to/mcp-personal/mcp_sqlite_server.py",
+      "args": ["--allow-writes"],
+      "env": {
+        "MCP_SQLITE_ALLOW_WRITES": "true"
+      }
     }
-    // Add more servers here as they become available
   }
 }
 ```
@@ -178,6 +199,12 @@ npx @modelcontextprotocol/inspector ./mcp_fd_server.py
 
 # Test the fuzzy search server  
 npx @modelcontextprotocol/inspector ./mcp_fuzzy_search.py
+
+# Test the SQLite server (read-only mode)
+npx @modelcontextprotocol/inspector ./mcp_sqlite_server.py
+
+# Test the SQLite server with write permissions
+npx @modelcontextprotocol/inspector ./mcp_sqlite_server.py -- --allow-writes
 ```
 
 This will:
@@ -282,6 +309,42 @@ The fuzzy search server also works as a standalone CLI tool:
 # Multiline content search - treat each file as a single record
 ./mcp_fuzzy_search.py search-files "class.*constructor" src --multiline
 ./mcp_fuzzy_search.py search-content "async.*await" . --multiline
+```
+
+### SQLite Server
+
+#### As an MCP Server
+
+Once configured in Claude Desktop, you can use natural language for database operations:
+
+- "List all tables in the database"
+- "Show me the schema for the users table"
+- "Query the last 10 orders from the orders table"
+- "Count active users in the database"
+- "Update user status to inactive for users who haven't logged in for a year" (requires write permissions)
+- "Create a new table for storing session data" (requires write permissions)
+
+#### CLI Usage
+
+The SQLite server also works as a standalone CLI tool:
+
+```bash
+# Query database (read-only operations)
+./mcp_sqlite_server.py query "SELECT * FROM users" database.db
+./mcp_sqlite_server.py query "SELECT COUNT(*) as total FROM orders WHERE status = 'active'" sales.db
+
+# List all tables
+./mcp_sqlite_server.py list-tables database.db
+
+# Describe table schema
+./mcp_sqlite_server.py describe-table users database.db
+
+# Execute write operations (requires --allow-writes flag)
+./mcp_sqlite_server.py execute "INSERT INTO users (name, email) VALUES ('John', 'john@example.com')" database.db --allow-writes
+./mcp_sqlite_server.py execute "UPDATE users SET active = 0 WHERE last_login < date('now', '-1 year')" database.db --allow-writes
+
+# Use in-memory database for testing
+./mcp_sqlite_server.py query "SELECT sqlite_version()" :memory:
 ```
 
 ## Multiline Search Mode
@@ -616,6 +679,109 @@ Search all file contents (like 'rg . | fzf'), then apply fuzzy filtering.
 }
 ```
 
+### SQLite Server Tools
+
+#### `query`
+Execute SELECT queries on the database.
+
+**Parameters:**
+- `sql` (required): SELECT query to execute
+- `db_path` (optional): Path to SQLite database (defaults to configured db_path or ':memory:')
+
+**Example:**
+```python
+{
+  "sql": "SELECT * FROM users WHERE active = 1 ORDER BY created_at DESC LIMIT 10",
+  "db_path": "myapp.db"
+}
+```
+
+#### `execute`
+Execute INSERT, UPDATE, or DELETE queries (requires write permissions).
+
+**Parameters:**
+- `sql` (required): INSERT, UPDATE, or DELETE query to execute
+- `db_path` (optional): Path to SQLite database
+
+**Example:**
+```python
+{
+  "sql": "UPDATE users SET last_login = datetime('now') WHERE id = 123",
+  "db_path": "myapp.db"
+}
+```
+
+#### `list_tables`
+List all tables in the database.
+
+**Parameters:**
+- `db_path` (optional): Path to SQLite database
+
+**Example:**
+```python
+{
+  "db_path": "myapp.db"
+}
+```
+
+#### `describe_table`
+Get detailed schema information for a specific table, including columns, types, constraints, and indexes.
+
+**Parameters:**
+- `table_name` (required): Name of the table to describe
+- `db_path` (optional): Path to SQLite database
+
+**Example:**
+```python
+{
+  "table_name": "users",
+  "db_path": "myapp.db"
+}
+```
+
+#### `create_table`
+Create a new table with specified columns (requires write permissions).
+
+**Parameters:**
+- `table_name` (required): Name of the table to create
+- `columns` (required): List of column definitions
+- `db_path` (optional): Path to SQLite database
+
+**Column Definition:**
+- `name` (required): Column name
+- `type` (required): SQLite data type (TEXT, INTEGER, REAL, BLOB, etc.)
+- `constraints` (optional): Column constraints (PRIMARY KEY, NOT NULL, UNIQUE, etc.)
+
+**Example:**
+```python
+{
+  "table_name": "sessions",
+  "columns": [
+    {
+      "name": "id",
+      "type": "TEXT",
+      "constraints": "PRIMARY KEY"
+    },
+    {
+      "name": "user_id",
+      "type": "INTEGER",
+      "constraints": "NOT NULL"
+    },
+    {
+      "name": "created_at",
+      "type": "TIMESTAMP",
+      "constraints": "DEFAULT CURRENT_TIMESTAMP"
+    },
+    {
+      "name": "expires_at",
+      "type": "TIMESTAMP",
+      "constraints": "NOT NULL"
+    }
+  ],
+  "db_path": "myapp.db"
+}
+```
+
 ## Development
 
 ### Project Structure
@@ -623,10 +789,12 @@ Search all file contents (like 'rg . | fzf'), then apply fuzzy filtering.
 mcp-personal/
 ├── mcp_fd_server.py      # File search MCP server
 ├── mcp_fuzzy_search.py   # Fuzzy content search MCP server
+├── mcp_sqlite_server.py  # SQLite database MCP server
 ├── tests/                # Test suite
 │   ├── test_simple.py    # Direct function tests
 │   ├── test_fd_server.py # File search MCP integration tests
 │   ├── test_fuzzy_search.py # Fuzzy search tests
+│   ├── test_sqlite_server.py # SQLite server tests
 │   └── test_cli.py       # CLI interface tests
 ├── pyproject.toml        # Project configuration
 ├── Makefile              # Development commands
@@ -717,6 +885,14 @@ Additionally uses:
 - Respects `.gitignore` by default (use `--hidden` to include ignored files)
 - Be mindful when searching in repositories with sensitive data
 
+### SQLite Server
+- **Read-only by default** - Prevents accidental data modification
+- Write operations require explicit `--allow-writes` flag or environment variable
+- Has full database access based on file permissions
+- Can execute arbitrary SQL queries when write mode is enabled
+- Be extremely cautious with write permissions on production databases
+- Consider using separate read-only database users when possible
+
 ## Troubleshooting
 
 ### "Cannot find the `fd` binary"
@@ -749,3 +925,6 @@ This project is open source and available under the [MIT License](LICENSE).
 ### Fuzzy Search Server
 - [ripgrep](https://github.com/BurntSushi/ripgrep) - Recursively search directories for a regex pattern
 - [fzf](https://github.com/junegunn/fzf) - A command-line fuzzy finder
+
+### SQLite Server
+- [SQLite](https://www.sqlite.org/) - Self-contained, serverless, zero-configuration SQL database engine
