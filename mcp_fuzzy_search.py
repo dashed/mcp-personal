@@ -41,6 +41,14 @@ SPACES MATTER - THEY SEPARATE SEARCH PATTERNS!
 - 'foo/bar' → Matches items with 'foo/bar' (1 pattern)
 - 'src /test$' → Matches items with 'src' AND ending with '/test'
 - 'src/test$' → Matches items ending with 'src/test'
+- 'foo\\ bar' → Matches items with literal 'foo bar' (escaped space)
+
+ADVANCED FZF FEATURES (from source code analysis)
+------------------------------------------------
+- Smart Case: Case-insensitive by default, case-sensitive if query has uppercase
+- Normalization: Accented chars normalized (café → cafe) unless --literal used
+- Exact Boundary Match: ''word'' matches at word boundaries (_ counts as boundary)
+- Scoring: Matches at word boundaries, path separators, camelCase get bonus points
 
 Key Features
 -----------
@@ -264,18 +272,22 @@ mcp = FastMCP("fuzzy-search")
         "    'main config' → files containing both 'main' AND 'config'\n"
         "  OR Logic: Use | to match any term\n"
         "    'py$ | js$ | go$' → files ending in .py OR .js OR .go\n"
-        "  Exact Match: Wrap in single quotes for exact string matching\n"
-        "    ''main.py'' → exact match for 'main.py'\n"
-        "    'test → partial exact match for 'test'\n"
+        "  Exact Match: Single quote prefix for exact (non-fuzzy) matching\n"
+        "    'test → exact match for 'test' (NOT fuzzy)\n"
+        "  Exact Boundary Match: Wrap in quotes for word boundary matching\n"
+        "    ''main.py'' → matches 'main.py' at word boundaries\n"
         "  Position Anchors (NOT regex anchors):\n"
-        "    '^src' → files starting with 'src' (NOT a regex)\n"
-        "    '.json$' → files ending with '.json' (NOT a regex)\n"
-        "    '^README$' → files exactly named 'README'\n\n"
+        "    '^src' → files starting with 'src' (prefix match)\n"
+        "    '.json$' → files ending with '.json' (suffix match)\n"
+        "    '^README$' → files exactly equal to 'README'\n"
+        "  Escaped Spaces: Use backslash to match literal spaces\n"
+        "    'foo\\\\ bar' → matches literal 'foo bar' (one pattern)\n\n"
         "UNDERSTANDING SPACES (Critical!):\n"
         "  'temp/test$' → Matches paths containing 'temp/test' at the end\n"
         "  'temp /test$' → Matches paths with 'temp' AND ending with '/test' (space matters!)\n"
         "  'dir test' → Matches paths containing 'dir' AND 'test' anywhere\n"
         "  'dir/test' → Matches paths containing 'dir/test' as one pattern\n"
+        "  'My\\\\ Documents' → Matches literal 'My Documents' (escaped space)\n"
         "  Negation: Use ! to exclude matches\n"
         "    '!test' → exclude files containing 'test'\n"
         "    '!^src' → exclude files starting with 'src'\n"
@@ -439,17 +451,20 @@ def fuzzy_search_files(
         "  Multiple terms: 'update spend' → lines with both terms (space = AND)\n"
         "  OR logic: 'update | modify' → lines with either term\n"
         "  File filtering: 'test.py: update' → only in test.py files\n"
-        "  Exact match: ''exact phrase'' → exact string match\n"
-        "  Exclusion: 'update !test' → exclude test files\n"
-        "  With prefix: '^def update' → lines starting with 'def update' (NOT regex!)\n"
-        "  With suffix: 'update$' → lines ending with 'update' (NOT regex!)\n\n"
+        "  Exact match prefix: 'update → exact (non-fuzzy) match\n"
+        "  Exact boundary: ''exact phrase'' → matches at word boundaries\n"
+        "  Exclusion: 'update !test' → exclude lines with 'test'\n"
+        "  With prefix: '^def update' → lines starting with 'def update'\n"
+        "  With suffix: 'update$' → lines ending with 'update'\n"
+        "  Escaped spaces: 'TODO:\\\\ fix' → matches literal 'TODO: fix'\n\n"
         "UNDERSTANDING SPACES - CRITICAL FOR PRECISE SEARCHES:\n"
         "  'def update_method' → Lines containing the exact pattern 'def update_method'\n"
         "  'def update method' → Lines containing 'def' AND 'update' AND 'method' (3 patterns!)\n"
         "  'src/test$' → Lines ending with 'src/test'\n"
         "  'src /test$' → Lines containing 'src' AND ending with '/test' (space matters!)\n"
         "  'TODO: fix' → Lines containing 'TODO:' AND 'fix' (space creates 2 patterns)\n"
-        "  ''TODO: fix'' → Lines containing exact phrase 'TODO: fix' (quotes preserve space)\n\n"
+        "  ''TODO: fix'' → Lines with 'TODO: fix' at word boundaries\n"
+        "  'TODO:\\\\ fix' → Lines containing literal 'TODO: fix' (escaped space)\n\n"
         "COMMON MISTAKES TO AVOID:\n"
         "  ✗ 'def.*update' → WRONG! This is regex, not supported\n"
         "  ✓ 'def update' → CORRECT! Fuzzy matches both terms\n"
@@ -730,6 +745,14 @@ Spaces separate fuzzy patterns! This is crucial for precise searches:
   "temp test" → Two patterns: paths containing 'temp' AND 'test' anywhere
   "temp /test$" → Two patterns: paths with 'temp' AND ending with '/test'
   "src config.json" → Two patterns: paths with 'src' AND 'config.json'
+  "My\\ Documents" → One pattern: paths containing literal 'My Documents'
+
+ADDITIONAL FZF FEATURES
+======================
+- Smart Case: lowercase query = case-insensitive, Mixed Case = case-sensitive
+- Single Quote Prefix: 'term → exact match (disables fuzzy)
+- Double Single Quotes: ''term'' → exact match at word boundaries
+- Latin Normalization: café matches cafe (unless --literal is used)
 
 UNDERSTANDING THE PIPELINE
 =========================

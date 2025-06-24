@@ -29,6 +29,14 @@ Each space separates fuzzy patterns with AND logic:
 - 'foo bar' → Files containing 'foo' AND 'bar' (2 patterns)
 - 'foo/bar' → Files containing 'foo/bar' (1 pattern)
 - 'temp /test$' → Files with 'temp' AND ending with '/test'
+- 'foo\\ bar' → Files containing literal 'foo bar' (escaped space)
+
+ADVANCED FZF FEATURES (from source code analysis)
+------------------------------------------------
+- Smart Case: Case-insensitive by default, case-sensitive if query has uppercase
+- Latin Normalization: Accented chars normalized (café → cafe)
+- Exact Boundary Match: ''word'' matches at word boundaries (_ is boundary)
+- Scoring: Matches at special positions (boundaries, separators) score higher
 
 Quick start
 -----------
@@ -223,14 +231,17 @@ def search_files(
         "fzf Query Syntax (NO REGEX SUPPORT):\n"
         "  CRITICAL: SPACES SEPARATE PATTERNS! Each space creates a new fuzzy pattern\n"
         "  Basic: 'term1 term2' (AND logic), 'term1 | term2' (OR logic)\n"
-        "  Exact: ''exact'' (exact match), 'term (partial exact)\n"
-        "  Position: '^start' (prefix), 'end$' (suffix), '^exact$' (equal) - NOT regex!\n"
-        "  Negation: '!exclude' (NOT), '!^prefix' (NOT prefix), '!end$' (NOT suffix)\n\n"
+        "  Exact prefix: 'term → exact (non-fuzzy) match\n"
+        "  Exact boundary: ''term'' → matches at word boundaries\n"
+        "  Position: '^start' (prefix), 'end$' (suffix), '^exact$' (equal)\n"
+        "  Negation: '!exclude' (NOT), '!^prefix' (NOT prefix), '!end$' (NOT suffix)\n"
+        "  Escaped spaces: 'foo\\\\ bar' → matches literal 'foo bar'\n\n"
         "UNDERSTANDING SPACES (Critical for precise filtering!):\n"
         "  'temp/test$' → Files with paths ending in 'temp/test'\n"
         "  'temp /test$' → Files with 'temp' in path AND ending with '/test' (space matters!)\n"
         "  'dir test.txt' → Files with 'dir' AND 'test.txt' anywhere in path\n"
-        "  'dir/test.txt' → Files with 'dir/test.txt' as one pattern\n\n"
+        "  'dir/test.txt' → Files with 'dir/test.txt' as one pattern\n"
+        "  'My\\\\ Documents' → Files with literal 'My Documents' in path\n\n"
         "Examples:\n"
         "  'config .json$' → Files with 'config' AND ending with '.json'\n"
         "  '^src py$ | js$ | go$' → Files in src/ ending with .py, .js, or .go\n"
@@ -239,7 +250,9 @@ def search_files(
         "  ✗ 'class.*method' → WRONG! This is regex\n"
         "  ✓ 'class method' → CORRECT! Fuzzy matches both\n"
         "  ✗ '\\\\w+\\\\.py$' → WRONG! Regex not supported\n"
-        "  ✓ '.py$' → CORRECT! Files ending with .py\n\n"
+        "  ✓ '.py$' → CORRECT! Files ending with .py\n"
+        "  ✗ 'My Documents' → WRONG! Matches 'My' AND 'Documents' separately\n"
+        "  ✓ 'My\\\\ Documents' → CORRECT! Matches literal 'My Documents'\n\n"
         "Multiline Mode:\n"
         "  When enabled, processes file contents as multiline records using null delimiters.\n"
         "  Useful for filtering entire file contents, code blocks, or structured data.\n"
