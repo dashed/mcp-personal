@@ -35,6 +35,13 @@ The fuzzy_filter parameter does NOT support regular expressions!
 - ✓ Use | for OR logic, ! for exclusion
 - ✓ Use ^ and $ for prefix/suffix (NOT regex anchors!)
 
+SPACES MATTER - THEY SEPARATE SEARCH PATTERNS!
+----------------------------------------------
+- 'foo bar' → Matches items with 'foo' AND 'bar' (2 patterns)
+- 'foo/bar' → Matches items with 'foo/bar' (1 pattern)
+- 'src /test$' → Matches items with 'src' AND ending with '/test'
+- 'src/test$' → Matches items ending with 'src/test'
+
 Key Features
 -----------
 - Searches through ALL file contents by default
@@ -252,6 +259,7 @@ mcp = FastMCP("fuzzy-search")
         "  limit  (int, optional): Max results to return. Default 20.\n"
         "  multiline (bool, optional): Enable multiline file content search. Default false.\n\n"
         "fzf Query Syntax (NO REGEX SUPPORT):\n"
+        "  CRITICAL: SPACES SEPARATE SEARCH TERMS - Each space creates a new fuzzy pattern!\n"
         "  Basic Terms: Space-separated terms use AND logic (all must match)\n"
         "    'main config' → files containing both 'main' AND 'config'\n"
         "  OR Logic: Use | to match any term\n"
@@ -262,7 +270,12 @@ mcp = FastMCP("fuzzy-search")
         "  Position Anchors (NOT regex anchors):\n"
         "    '^src' → files starting with 'src' (NOT a regex)\n"
         "    '.json$' → files ending with '.json' (NOT a regex)\n"
-        "    '^README$' → files exactly named 'README'\n"
+        "    '^README$' → files exactly named 'README'\n\n"
+        "UNDERSTANDING SPACES (Critical!):\n"
+        "  'temp/test$' → Matches paths containing 'temp/test' at the end\n"
+        "  'temp /test$' → Matches paths with 'temp' AND ending with '/test' (space matters!)\n"
+        "  'dir test' → Matches paths containing 'dir' AND 'test' anywhere\n"
+        "  'dir/test' → Matches paths containing 'dir/test' as one pattern\n"
         "  Negation: Use ! to exclude matches\n"
         "    '!test' → exclude files containing 'test'\n"
         "    '!^src' → exclude files starting with 'src'\n"
@@ -421,14 +434,22 @@ def fuzzy_search_files(
         "  rg_flags (str, optional): Extra flags for ripgrep (see below).\n"
         "  multiline (bool, optional): Enable multiline record processing. Default false.\n\n"
         "Fuzzy Filter Syntax (NO REGEX - these are fzf patterns):\n"
+        "  CRITICAL: SPACES MATTER! Each space separates fuzzy patterns (AND logic)\n"
         "  Basic search: 'update_ondemand_max_spend' → finds all occurrences\n"
-        "  Multiple terms: 'update spend' → lines with both terms\n"
+        "  Multiple terms: 'update spend' → lines with both terms (space = AND)\n"
         "  OR logic: 'update | modify' → lines with either term\n"
         "  File filtering: 'test.py: update' → only in test.py files\n"
         "  Exact match: ''exact phrase'' → exact string match\n"
         "  Exclusion: 'update !test' → exclude test files\n"
         "  With prefix: '^def update' → lines starting with 'def update' (NOT regex!)\n"
         "  With suffix: 'update$' → lines ending with 'update' (NOT regex!)\n\n"
+        "UNDERSTANDING SPACES - CRITICAL FOR PRECISE SEARCHES:\n"
+        "  'def update_method' → Lines containing the exact pattern 'def update_method'\n"
+        "  'def update method' → Lines containing 'def' AND 'update' AND 'method' (3 patterns!)\n"
+        "  'src/test$' → Lines ending with 'src/test'\n"
+        "  'src /test$' → Lines containing 'src' AND ending with '/test' (space matters!)\n"
+        "  'TODO: fix' → Lines containing 'TODO:' AND 'fix' (space creates 2 patterns)\n"
+        "  ''TODO: fix'' → Lines containing exact phrase 'TODO: fix' (quotes preserve space)\n\n"
         "COMMON MISTAKES TO AVOID:\n"
         "  ✗ 'def.*update' → WRONG! This is regex, not supported\n"
         "  ✓ 'def update' → CORRECT! Fuzzy matches both terms\n"
@@ -448,7 +469,12 @@ def fuzzy_search_files(
         "  3. Find imports in Python files only:\n"
         '     fuzzy_filter="import pandas", rg_flags="-t py"\n'
         "  4. Case-insensitive search with context:\n"
-        '     fuzzy_filter="UpdateOndemand", rg_flags="-i -C 2"\n\n'
+        '     fuzzy_filter="UpdateOndemand", rg_flags="-i -C 2"\n'
+        "  5. PRACTICAL EXAMPLE - Finding specific test files:\n"
+        '     Finding "def test_" in files ending with "_test.py":\n'
+        '     fuzzy_filter="def test_ _test.py:" (space separates patterns!)\n'
+        '     Finding "def test_" in files containing "test" at end of path:\n'
+        '     fuzzy_filter="def test_ /test.py:" (matches src/test.py, lib/test.py)\n\n'
         "Returns: { matches: Array<{file: string, line: number, content: string}> } or { error: string }"
     )
 )
@@ -682,6 +708,11 @@ FUZZY SEARCH EXAMPLES
 5. Search with case-insensitive matching:
    $ ./mcp_fuzzy_search.py search-content "config" --rg-flags "-i"
 
+6. SPACES MATTER - Find files named 'test' with no extension in temp dir:
+   $ ./mcp_fuzzy_search.py search-files "temp /test$"  # Space before /test$ is critical!
+   vs
+   $ ./mcp_fuzzy_search.py search-files "temp/test$"   # Different! Looks for 'temp/test' at end
+
 FUZZY FILTER SYNTAX
 ==================
 
@@ -690,6 +721,15 @@ FUZZY FILTER SYNTAX
 ✓ Exact match: "'exact phrase'"
 ✓ File filtering: "test.py: update"
 ✓ Exclusion: "update !test"
+
+CRITICAL: UNDERSTANDING SPACES
+=============================
+Spaces separate fuzzy patterns! This is crucial for precise searches:
+
+  "temp/test" → One pattern: paths containing 'temp/test'
+  "temp test" → Two patterns: paths containing 'temp' AND 'test' anywhere
+  "temp /test$" → Two patterns: paths with 'temp' AND ending with '/test'
+  "src config.json" → Two patterns: paths with 'src' AND 'config.json'
 
 UNDERSTANDING THE PIPELINE
 =========================

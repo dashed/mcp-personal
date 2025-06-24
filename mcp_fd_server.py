@@ -23,6 +23,13 @@ CRITICAL FOR AI AGENTS: NO REGEX IN FZF FILTER
 The 'filter' parameter in filter_files does NOT support regular expressions!
 Use fzf's fuzzy matching syntax instead (spaces for AND, | for OR, etc).
 
+SPACES MATTER IN FZF PATTERNS!
+-----------------------------
+Each space separates fuzzy patterns with AND logic:
+- 'foo bar' → Files containing 'foo' AND 'bar' (2 patterns)
+- 'foo/bar' → Files containing 'foo/bar' (1 pattern)
+- 'temp /test$' → Files with 'temp' AND ending with '/test'
+
 Quick start
 -----------
 ```bash
@@ -214,11 +221,20 @@ def search_files(
         "  fzf_flags (str, optional): Extra flags for fzf.\n"
         "  multiline (bool, optional): Enable multiline support for file content. Default false.\n\n"
         "fzf Query Syntax (NO REGEX SUPPORT):\n"
+        "  CRITICAL: SPACES SEPARATE PATTERNS! Each space creates a new fuzzy pattern\n"
         "  Basic: 'term1 term2' (AND logic), 'term1 | term2' (OR logic)\n"
         "  Exact: ''exact'' (exact match), 'term (partial exact)\n"
         "  Position: '^start' (prefix), 'end$' (suffix), '^exact$' (equal) - NOT regex!\n"
-        "  Negation: '!exclude' (NOT), '!^prefix' (NOT prefix), '!end$' (NOT suffix)\n"
-        "  Examples: 'config .json$', '^src py$ | js$ | go$', ''main.py'' !test'\n\n"
+        "  Negation: '!exclude' (NOT), '!^prefix' (NOT prefix), '!end$' (NOT suffix)\n\n"
+        "UNDERSTANDING SPACES (Critical for precise filtering!):\n"
+        "  'temp/test$' → Files with paths ending in 'temp/test'\n"
+        "  'temp /test$' → Files with 'temp' in path AND ending with '/test' (space matters!)\n"
+        "  'dir test.txt' → Files with 'dir' AND 'test.txt' anywhere in path\n"
+        "  'dir/test.txt' → Files with 'dir/test.txt' as one pattern\n\n"
+        "Examples:\n"
+        "  'config .json$' → Files with 'config' AND ending with '.json'\n"
+        "  '^src py$ | js$ | go$' → Files in src/ ending with .py, .js, or .go\n"
+        "  ''main.py'' !test' → Exact 'main.py' but not containing 'test'\n\n"
         "COMMON MISTAKES:\n"
         "  ✗ 'class.*method' → WRONG! This is regex\n"
         "  ✓ 'class method' → CORRECT! Fuzzy matches both\n"
