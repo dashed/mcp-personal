@@ -18,6 +18,11 @@ Tools exposed to LLMs
 * **`filter_files`** – pipe the `fd` output through `fzf --filter` for fuzzy,
   *headless* matching (perfect for non‑interactive stdio environments).
 
+CRITICAL FOR AI AGENTS: NO REGEX IN FZF FILTER
+----------------------------------------------
+The 'filter' parameter in filter_files does NOT support regular expressions!
+Use fzf's fuzzy matching syntax instead (spaces for AND, | for OR, etc).
+
 Quick start
 -----------
 ```bash
@@ -93,6 +98,59 @@ def _require(binary: str | None, name: str) -> str:
     return binary
 
 
+def _looks_like_regex(text: str) -> bool:
+    """Detect if a string looks like a regex pattern rather than fuzzy search terms."""
+    import re
+
+    # Common regex metacharacters and patterns
+    regex_indicators = [
+        r"\.\*",  # .* (any characters)
+        r"\.\+",  # .+ (one or more)
+        r"\\\w",  # \w (word character)
+        r"\\\d",  # \d (digit)
+        r"\\\s",  # \s (whitespace)
+        r"\[.+\]",  # [abc] (character class)
+        r"\(.+\)",  # (group) (capturing group)
+        r"\{\d+,?\d*\}",  # {n,m} (quantifier)
+        r"\\\.",  # \. (escaped dot)
+    ]
+
+    # Check if text contains regex patterns
+    for pattern in regex_indicators:
+        if re.search(pattern, text):
+            return True
+
+    # Check for other regex-like constructs
+    if re.search(r"[^\\]\|[^\\|]", text):  # | not in fzf OR context
+        return True
+
+    return False
+
+
+def _suggest_fuzzy_terms(regex_pattern: str) -> str:
+    """Convert common regex patterns to fuzzy search suggestions."""
+    import re
+
+    # Remove common regex constructs to suggest fuzzy terms
+    fuzzy = regex_pattern
+    fuzzy = re.sub(r"\.\*", " ", fuzzy)  # .* -> space
+    fuzzy = re.sub(r"\.\+", " ", fuzzy)  # .+ -> space
+    fuzzy = re.sub(r"\\\w\+?", "", fuzzy)  # \w+ -> remove
+    fuzzy = re.sub(r"\\\d\+?", "", fuzzy)  # \d+ -> remove
+    fuzzy = re.sub(r"\\\s\+?", " ", fuzzy)  # \s+ -> space
+    fuzzy = re.sub(r"[\[\]\(\)\{\}]", "", fuzzy)  # Remove brackets
+    fuzzy = re.sub(r"\\\.", ".", fuzzy)  # \. -> .
+    fuzzy = re.sub(r"\s+", " ", fuzzy)  # Multiple spaces -> single space
+    fuzzy = fuzzy.strip()
+
+    # If we end up with nothing useful, extract alphanumeric parts
+    if not fuzzy or fuzzy.isspace():
+        words = re.findall(r"\w+", regex_pattern)
+        fuzzy = " ".join(words)
+
+    return fuzzy
+
+
 # ---------------------------------------------------------------------------
 # FastMCP server instance
 # ---------------------------------------------------------------------------
@@ -146,20 +204,26 @@ def search_files(
 @mcp.tool(
     description=(
         "Run fd, then fuzzy‑filter with fzf --filter.\n\n"
+        "IMPORTANT: NO REGEX SUPPORT in 'filter' - use fzf's fuzzy syntax, NOT regular expressions!\n\n"
         "Args:\n"
-        "  filter (str): fzf query string with advanced syntax support. Required.\n"
+        "  filter (str): fzf query string (NOT regex!). Required.\n"
         "  pattern (str, optional): Pattern for fd (empty = list all).\n"
         "  path    (str, optional): Directory to search. Defaults to current dir.\n"
         "  first   (bool, optional): Return only the best match. Default false.\n"
         "  fd_flags  (str, optional): Extra flags for fd.\n"
         "  fzf_flags (str, optional): Extra flags for fzf.\n"
         "  multiline (bool, optional): Enable multiline support for file content. Default false.\n\n"
-        "fzf Query Syntax:\n"
+        "fzf Query Syntax (NO REGEX SUPPORT):\n"
         "  Basic: 'term1 term2' (AND logic), 'term1 | term2' (OR logic)\n"
         "  Exact: ''exact'' (exact match), 'term (partial exact)\n"
-        "  Position: '^start' (prefix), 'end$' (suffix), '^exact$' (equal)\n"
+        "  Position: '^start' (prefix), 'end$' (suffix), '^exact$' (equal) - NOT regex!\n"
         "  Negation: '!exclude' (NOT), '!^prefix' (NOT prefix), '!end$' (NOT suffix)\n"
         "  Examples: 'config .json$', '^src py$ | js$ | go$', ''main.py'' !test'\n\n"
+        "COMMON MISTAKES:\n"
+        "  ✗ 'class.*method' → WRONG! This is regex\n"
+        "  ✓ 'class method' → CORRECT! Fuzzy matches both\n"
+        "  ✗ '\\\\w+\\\\.py$' → WRONG! Regex not supported\n"
+        "  ✓ '.py$' → CORRECT! Files ending with .py\n\n"
         "Multiline Mode:\n"
         "  When enabled, processes file contents as multiline records using null delimiters.\n"
         "  Useful for filtering entire file contents, code blocks, or structured data.\n"
@@ -182,6 +246,16 @@ def filter_files(
 
     fd_bin = _require(FD_EXECUTABLE, "fd")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
+
+    # Check for regex patterns and warn
+    warnings = []
+    if _looks_like_regex(filter):
+        suggested_terms = _suggest_fuzzy_terms(filter)
+        warnings.append(
+            f"The 'filter' parameter contains regex-like patterns ({filter!r}). "
+            f"This parameter expects fzf fuzzy search terms, not regex. "
+            f"Try: {suggested_terms!r}"
+        )
 
     # Ensure path is properly formatted
     search_path = str(Path(path).resolve())
@@ -209,7 +283,10 @@ def filter_files(
                     continue  # Skip files that can't be read
 
             if not multiline_input:
-                return {"matches": []}
+                result = {"matches": []}
+                if warnings:
+                    result["warnings"] = warnings
+                return result
 
             # Use fzf with multiline support
             fzf_cmd: list[str] = [fzf_bin, "--filter", filter, "--read0", "--print0"]
@@ -231,7 +308,10 @@ def filter_files(
                             matches.append(chunk.decode("utf-8", errors="replace"))
 
         except subprocess.CalledProcessError as exc:
-            return {"error": str(exc)}
+            error_result = {"error": str(exc)}
+            if warnings:
+                error_result["warnings"] = warnings
+            return error_result
     else:
         # Standard mode - file paths only
         fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, search_path]
@@ -246,11 +326,19 @@ def filter_files(
             fd_proc.wait()
             matches = [_normalize_path(p) for p in out.splitlines() if p]
         except subprocess.CalledProcessError as exc:
-            return {"error": str(exc)}
+            error_result = {"error": str(exc)}
+            if warnings:
+                error_result["warnings"] = warnings
+            return error_result
 
     if first and matches:
         matches = matches[:1]
-    return {"matches": matches}
+
+    result = {"matches": matches}
+    if warnings:
+        result["warnings"] = warnings
+
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -26,10 +26,19 @@ Understanding the Search Pipeline
                                            ↑
                                     'fuzzy_filter'
 
+CRITICAL FOR AI AGENTS: NO REGEX SUPPORT
+----------------------------------------
+The fuzzy_filter parameter does NOT support regular expressions!
+- ✗ NO regex patterns like '.*', '\\w+', '[a-z]+', etc.
+- ✓ Use fzf's fuzzy matching syntax instead
+- ✓ Space-separated terms for AND logic
+- ✓ Use | for OR logic, ! for exclusion
+- ✓ Use ^ and $ for prefix/suffix (NOT regex anchors!)
+
 Key Features
 -----------
 - Searches through ALL file contents by default
-- Uses fuzzy matching to find relevant lines
+- Uses fuzzy matching to find relevant lines (NOT regex!)
 - Supports advanced fzf syntax (OR, exact match, exclusions)
 - Can be optimized with rg_flags for specific file types
 
@@ -235,13 +244,14 @@ mcp = FastMCP("fuzzy-search")
 @mcp.tool(
     description=(
         "Search for file paths using fuzzy matching.\n\n"
+        "IMPORTANT: NO REGEX SUPPORT - fuzzy_filter uses fzf's fuzzy matching syntax, NOT regular expressions!\n\n"
         "Args:\n"
-        "  fuzzy_filter (str): fzf query string with advanced syntax support. Required.\n"
+        "  fuzzy_filter (str): fzf query string (NOT regex). Required.\n"
         "  path   (str, optional): Directory to search. Defaults to current dir.\n"
         "  hidden (bool, optional): Include hidden files. Default false.\n"
         "  limit  (int, optional): Max results to return. Default 20.\n"
         "  multiline (bool, optional): Enable multiline file content search. Default false.\n\n"
-        "fzf Query Syntax (Extended Search Mode):\n"
+        "fzf Query Syntax (NO REGEX SUPPORT):\n"
         "  Basic Terms: Space-separated terms use AND logic (all must match)\n"
         "    'main config' → files containing both 'main' AND 'config'\n"
         "  OR Logic: Use | to match any term\n"
@@ -249,9 +259,9 @@ mcp = FastMCP("fuzzy-search")
         "  Exact Match: Wrap in single quotes for exact string matching\n"
         "    ''main.py'' → exact match for 'main.py'\n"
         "    'test → partial exact match for 'test'\n"
-        "  Position Anchors:\n"
-        "    '^src' → files starting with 'src'\n"
-        "    '.json$' → files ending with '.json'\n"
+        "  Position Anchors (NOT regex anchors):\n"
+        "    '^src' → files starting with 'src' (NOT a regex)\n"
+        "    '.json$' → files ending with '.json' (NOT a regex)\n"
         "    '^README$' → files exactly named 'README'\n"
         "  Negation: Use ! to exclude matches\n"
         "    '!test' → exclude files containing 'test'\n"
@@ -401,23 +411,29 @@ def fuzzy_search_files(
 @mcp.tool(
     description=(
         "Search file contents using fuzzy filtering.\n\n"
+        "CRITICAL: NO REGEX SUPPORT - fuzzy_filter does NOT accept regular expressions!\n\n"
         "    Files → ripgrep (all lines) → fzf (fuzzy filter) → Results\n\n"
         "Args:\n"
-        "  fuzzy_filter (str): Fuzzy search query. Required.\n"
+        "  fuzzy_filter (str): Fuzzy search query (NOT regex!). Required.\n"
         "  path (str, optional): Directory/file to search. Defaults to current dir.\n"
         "  hidden (bool, optional): Search hidden files. Default false.\n"
         "  limit (int, optional): Max results to return. Default 20.\n"
         "  rg_flags (str, optional): Extra flags for ripgrep (see below).\n"
         "  multiline (bool, optional): Enable multiline record processing. Default false.\n\n"
-        "Fuzzy Filter Syntax:\n"
+        "Fuzzy Filter Syntax (NO REGEX - these are fzf patterns):\n"
         "  Basic search: 'update_ondemand_max_spend' → finds all occurrences\n"
         "  Multiple terms: 'update spend' → lines with both terms\n"
         "  OR logic: 'update | modify' → lines with either term\n"
         "  File filtering: 'test.py: update' → only in test.py files\n"
         "  Exact match: ''exact phrase'' → exact string match\n"
         "  Exclusion: 'update !test' → exclude test files\n"
-        "  With prefix: '^def update' → lines starting with 'def update'\n"
-        "  With suffix: 'update$' → lines ending with 'update'\n\n"
+        "  With prefix: '^def update' → lines starting with 'def update' (NOT regex!)\n"
+        "  With suffix: 'update$' → lines ending with 'update' (NOT regex!)\n\n"
+        "COMMON MISTAKES TO AVOID:\n"
+        "  ✗ 'def.*update' → WRONG! This is regex, not supported\n"
+        "  ✓ 'def update' → CORRECT! Fuzzy matches both terms\n"
+        "  ✗ 'class\\\\s+\\\\w+' → WRONG! Regex not supported\n"
+        "  ✓ 'class' → CORRECT! Fuzzy match\n\n"
         "Useful rg_flags for search optimization:\n"
         "  File Types: '-t py' (Python), '-t js' (JavaScript), '-T test' (exclude tests)\n"
         "  Case: '-i' (ignore case), '-S' (smart case), '-s' (case sensitive)\n"
@@ -680,7 +696,7 @@ UNDERSTANDING THE PIPELINE
 
 Files → ripgrep (all lines) → Lines → fzf (fuzzy_filter) → Results
                                          ↑
-                                   fuzzy search
+                                   fuzzy search (NO REGEX!)
 """
     print(examples)
 

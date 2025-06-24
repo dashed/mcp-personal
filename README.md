@@ -16,7 +16,7 @@ Powerful file search capabilities using `fd` and `fzf`:
 Advanced content search using `ripgrep` and `fzf`:
 - **Content search** using `ripgrep` to search all lines in files
 - **Fuzzy filtering** of search results using `fzf --filter`
-- **Simplified interface** - just provide fuzzy search terms, no regex required
+- **Simplified interface** - just provide fuzzy search terms (NO regex support)
 - **Multiline record processing** for complex pattern matching
 - **Non-interactive** operation perfect for MCP integration
 - **File path fuzzy search** for finding files by name patterns
@@ -305,13 +305,14 @@ The fuzzy search server also works as a standalone CLI tool:
 ./mcp_fuzzy_search.py search-files "main" /path/to/search
 ./mcp_fuzzy_search.py search-files "test" . --hidden --limit 10
 
-# Search all content and filter with fzf (like 'rg . | fzf')
+# Search all content and filter with fzf (NO regex support)
 ./mcp_fuzzy_search.py search-content "TODO implement" .
 ./mcp_fuzzy_search.py search-content "error handle" src --rg-flags "-i"
 
 # Multiline content search - treat each file as a single record
-./mcp_fuzzy_search.py search-files "class.*constructor" src --multiline
-./mcp_fuzzy_search.py search-content "async.*await" . --multiline
+# Note: Even in multiline mode, these are fuzzy matches, NOT regex patterns
+./mcp_fuzzy_search.py search-files "class constructor" src --multiline
+./mcp_fuzzy_search.py search-content "async await" . --multiline
 ```
 
 ### SQLite Server
@@ -363,10 +364,10 @@ In multiline mode:
 ### When to Use Multiline Mode
 
 Multiline mode is perfect for:
-- **Finding class definitions** with their methods: `"class UserService.*authenticate"`
-- **Locating function implementations** with specific patterns: `"async function.*await.*fetch"`
-- **Searching for configuration blocks**: `"database.*host.*port"`
-- **Finding code structures** that span multiple lines: `"try.*catch.*finally"`
+- **Finding class definitions** with their methods: `"class UserService authenticate"` (fuzzy match, not regex)
+- **Locating function implementations** with specific patterns: `"async function await fetch"` (all terms in one file)
+- **Searching for configuration blocks**: `"database host port"` (finds files with all three terms)
+- **Finding code structures** that span multiple lines: `"try catch finally"` (fuzzy matches across lines)
 - **Identifying file contents** by structure rather than individual lines
 
 ### Multiline Examples
@@ -374,43 +375,47 @@ Multiline mode is perfect for:
 #### File Search Server Multiline
 ```bash
 # Find JavaScript files containing complete class definitions
-./mcp_fd_server.py filter "class.*constructor.*method" "" src --multiline
+# Note: These are fuzzy matches, not regex patterns
+./mcp_fd_server.py filter "class constructor method" "" src --multiline
 
 # Find Python files with specific class and method patterns  
-./mcp_fd_server.py filter "class.*def.*return" "" . --multiline
+./mcp_fd_server.py filter "class def return" "" . --multiline
 
 # Find configuration files with database connection blocks
-./mcp_fd_server.py filter "database.*host.*password" "" config --multiline
+./mcp_fd_server.py filter "database host password" "" config --multiline
 ```
 
 #### Fuzzy Search Server Multiline
 ```bash
 # Find files containing async function definitions
-./mcp_fuzzy_search.py search-files "async.*function.*await" src --multiline
+# IMPORTANT: These are fuzzy matches, NOT regex patterns!
+./mcp_fuzzy_search.py search-files "async function await" src --multiline
 
 # Search for files with specific multi-line patterns
-./mcp_fuzzy_search.py search-content "try.*catch.*finally" . --multiline
+./mcp_fuzzy_search.py search-content "try catch finally" . --multiline
 
 # Find files with class definitions containing specific methods
-./mcp_fuzzy_search.py search-content "class.*constructor.*render" src --multiline
+./mcp_fuzzy_search.py search-content "class constructor render" src --multiline
 ```
 
 ### Performance Considerations
 
 - **File size**: Multiline mode reads entire files into memory; best for typical source code files
 - **Result size**: Multiline results include complete file contents, which may be truncated for display
-- **Pattern complexity**: Simple patterns work well; very complex regex may be slower
+- **Pattern complexity**: Simple fuzzy patterns work well; complex queries may be slower
 
 ### Tips for Multiline Queries
 
-1. **Use specific terms**: `"class MyClass.*def method"` is better than just `"class.*def"`
-2. **Combine structure and content**: `"import React.*export default"` finds React components
+1. **Use specific terms**: `"class MyClass def method"` is better than just `"class def"` (no regex!)
+2. **Combine structure and content**: `"import React export default"` finds React components
 3. **Mind the output**: Results show the entire matching file content
 4. **Test incrementally**: Start with simple patterns and refine
 
 ## fzf Search Syntax Guide
 
 Both MCP servers use **fzf's extended search syntax** for powerful fuzzy filtering. Understanding this syntax will help you construct precise queries.
+
+**IMPORTANT**: The `fuzzy_filter` parameter in `fuzzy_search_content` does NOT support regular expressions. It uses fzf's fuzzy matching syntax as described below. If you need regex-like patterns, use the position anchors and exact matching features of fzf syntax instead.
 
 ### Basic Syntax
 
@@ -445,6 +450,8 @@ Both MCP servers use **fzf's extended search syntax** for powerful fuzzy filteri
 | `!term$` | Exclude suffix matches | `!.tmp$` excludes temporary files |
 
 ### Advanced Examples
+
+**Note**: These examples show how to achieve regex-like filtering WITHOUT using regular expressions, since `fuzzy_filter` does not support regex.
 
 ```bash
 # Find Python configuration files, excluding tests
@@ -652,7 +659,7 @@ Search for file paths using fuzzy matching.
 Search all file contents using fuzzy filtering.
 
 **Parameters:**
-- `fuzzy_filter` (required): Fuzzy search query for filtering results
+- `fuzzy_filter` (required): Fuzzy search query for filtering results (does NOT support regex - use fzf syntax instead, see "fzf Search Syntax Guide" section)
 - `path` (optional): Directory/file to search in (defaults to current directory)
 - `hidden` (optional): Search hidden files (default: false)
 - `limit` (optional): Maximum results to return (default: 20)
@@ -672,7 +679,7 @@ Search all file contents using fuzzy filtering.
 **Multiline Example:**
 ```python
 {
-  "fuzzy_filter": "async.*await.*catch",
+  "fuzzy_filter": "async await catch",
   "path": "./src",
   "multiline": true,
   "limit": 10
