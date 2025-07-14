@@ -5,21 +5,24 @@ A collection of [Model Context Protocol](https://modelcontextprotocol.io) (MCP) 
 ## Available MCP Servers
 
 ### 1. File Search Server (`mcp_fd_server.py`)
-Powerful file search capabilities using `fd` and `fzf`:
-- **Fast file search** using `fd` (a modern, user-friendly alternative to `find`)
-- **Fuzzy filtering** with `fzf` for intelligent file matching
-- **Multiline content search** for filtering entire file contents
-- **Regex and glob pattern** support
+Fuzzy file NAME search capabilities using `fd` and `fzf`:
+- **Fast file name search** using `fd` (searches file names/paths, NOT contents)
+- **Fuzzy filtering of file names** with `fzf` for intelligent name matching
+- **Pattern matching** with regex and glob support for file names
+- **Multiline mode** (advanced): can also search file contents when enabled
 - **Standalone CLI** for testing and direct usage
+- **Key point**: Primary purpose is finding files by NAME, not searching contents
 
 ### 2. Fuzzy Search Server (`mcp_fuzzy_search.py`)
-Advanced content search using `ripgrep` and `fzf`:
-- **Content search** using `ripgrep` to search all lines in files
-- **Fuzzy filtering** of search results using `fzf --filter`
+Advanced search with both file name and content capabilities using `ripgrep` and `fzf`:
+- **File name fuzzy search** - find files by partial/fuzzy names
+- **Content search** using `ripgrep` to search text within files
+- **Fuzzy filtering** of results using `fzf --filter`
+- **Two distinct modes**: 
+  - `fuzzy_search_files`: Search file NAMES/paths
+  - `fuzzy_search_content`: Search file CONTENTS
 - **Simplified interface** - just provide fuzzy search terms (NO regex support)
 - **Multiline record processing** for complex pattern matching
-- **Non-interactive** operation perfect for MCP integration
-- **File path fuzzy search** for finding files by name patterns
 - **Standalone CLI** for testing and direct usage
 
 ### 3. SQLite Server (`mcp_sqlite_server.py`)
@@ -256,31 +259,32 @@ The MCP Inspector is particularly valuable for:
 
 #### As an MCP Server
 
-Once configured in Claude Desktop, you can use natural language to search for files:
+Once configured in Claude Desktop, you can use natural language to search for files by NAME:
 
-- "Find all Python files in the src directory"
-- "Search for files containing 'config' in their name"
-- "Find test files modified in the last week"
+- "Find all Python files in the src directory" (searches file names ending in .py)
+- "Search for files with 'config' in their name" (fuzzy matches file names)
+- "Find test files by name" (searches for files with 'test' in the name)
+- "Use fuzzy search to find 'mainpy'" (finds main.py, main_py.txt, etc.)
 
 #### CLI Usage
 
 The file search server also works as a standalone CLI tool:
 
 ```bash
-# Search for files matching a pattern
-./mcp_fd_server.py search "\.py$" /path/to/search
+# Search for files by name pattern
+./mcp_fd_server.py search "\.py$" /path/to/search  # Find Python files by name
 
 # Search with additional fd flags
 ./mcp_fd_server.py search "\.js$" . --flags "--hidden --no-ignore"
 
-# Fuzzy filter results
-./mcp_fd_server.py filter "main" "\.py$" /path/to/search
+# Fuzzy filter file names/paths
+./mcp_fd_server.py filter "main" "\.py$" /path/to/search  # Fuzzy search for 'main' in Python file names
 
-# Get the best match only
-./mcp_fd_server.py filter "app" "" . --first
+# Get the best fuzzy match by name
+./mcp_fd_server.py filter "app" "" . --first  # Find file with name most similar to 'app'
 
-# Multiline content search - search entire file contents
-./mcp_fd_server.py filter "class.*function" "" src --multiline
+# Multiline mode - search file CONTENTS (not just names)
+./mcp_fd_server.py filter "class function" "" src --multiline  # Find files containing both terms
 ```
 
 ### Fuzzy Search Server
@@ -295,24 +299,35 @@ Once configured in Claude Desktop, you can use natural language for advanced sea
 - "Search for configuration files containing database settings"
 - "Find method definitions named 'update_ondemand_max_spend'"
 - "Search for async functions with error handling"
+- "Search for 'update' in test.py files only" (uses path+content matching)
+- "Search for 'async' in content only, ignore file paths" (use content_only mode)
 
 #### CLI Usage
 
 The fuzzy search server also works as a standalone CLI tool:
 
 ```bash
-# Fuzzy search for file paths
-./mcp_fuzzy_search.py search-files "main" /path/to/search
-./mcp_fuzzy_search.py search-files "test" . --hidden --limit 10
+# Fuzzy search for file NAMES/PATHS
+./mcp_fuzzy_search.py search-files "main" /path/to/search  # Find files with 'main' in the name
+./mcp_fuzzy_search.py search-files "test" . --hidden --limit 10  # Find test files by name
 
-# Search all content and filter with fzf (NO regex support)
-./mcp_fuzzy_search.py search-content "TODO implement" .
-./mcp_fuzzy_search.py search-content "error handle" src --rg-flags "-i"
+# Search file CONTENTS and filter with fzf (NO regex support)
+# Default: Matches on BOTH file paths AND content
+./mcp_fuzzy_search.py search-content "TODO implement" .  # Find lines containing both terms
+./mcp_fuzzy_search.py search-content "test.py: update" .  # Find 'update' in test.py files
+./mcp_fuzzy_search.py search-content "error handle" src --rg-flags "-i"  # Case insensitive
 
-# Multiline content search - treat each file as a single record
-# Note: Even in multiline mode, these are fuzzy matches, NOT regex patterns
-./mcp_fuzzy_search.py search-files "class constructor" src --multiline
-./mcp_fuzzy_search.py search-content "async await" . --multiline
+# Content-only mode: Match ONLY on content, ignore file paths
+./mcp_fuzzy_search.py search-content "TODO implement" . --content-only  # Pure content search
+./mcp_fuzzy_search.py search-content "async await" src --content-only  # Won't match file paths
+
+# Multiline mode - changes behavior:
+# search-files --multiline: Searches file CONTENTS instead of names
+./mcp_fuzzy_search.py search-files "class constructor" src --multiline  # Find files CONTAINING these terms
+
+# search-content --multiline: Treats whole files as searchable units
+./mcp_fuzzy_search.py search-content "async await" . --multiline  # Find files with both terms anywhere
+./mcp_fuzzy_search.py search-content "try catch" . --multiline --content-only  # Content-only + multiline
 ```
 
 ### SQLite Server
@@ -353,48 +368,51 @@ The SQLite server also works as a standalone CLI tool:
 
 ## Multiline Search Mode
 
-Both MCP servers support **multiline search mode** for advanced pattern matching across entire file contents, making it possible to find complex patterns that span multiple lines.
+Both MCP servers support **multiline search mode** which changes the search behavior:
 
 ### What is Multiline Mode?
 
-In multiline mode:
-- **File Search Server**: Reads each file's complete content and treats it as a single multiline record for fuzzy filtering
-- **Fuzzy Search Server**: Processes files as complete units rather than line-by-line, enabling pattern matching across line boundaries
+**Default behavior (multiline=false):**
+- **File Search Server**: Searches file NAMES/PATHS only
+- **Fuzzy Search Server**: Searches line-by-line within file contents
+
+**With multiline mode (multiline=true):**
+- **File Search Server**: Switches to searching file CONTENTS instead of names
+- **Fuzzy Search Server**: Treats entire file contents as single searchable units
 
 ### When to Use Multiline Mode
 
-Multiline mode is perfect for:
-- **Finding class definitions** with their methods: `"class UserService authenticate"` (fuzzy match, not regex)
-- **Locating function implementations** with specific patterns: `"async function await fetch"` (all terms in one file)
-- **Searching for configuration blocks**: `"database host port"` (finds files with all three terms)
-- **Finding code structures** that span multiple lines: `"try catch finally"` (fuzzy matches across lines)
-- **Identifying file contents** by structure rather than individual lines
+Multiline mode is for searching file CONTENTS (not names):
+- **Finding class definitions** with their methods: `"class UserService authenticate"` (fuzzy match in contents)
+- **Locating function implementations**: `"async function await fetch"` (all terms in one file)
+- **Searching for configuration blocks**: `"database host port"` (finds files containing all terms)
+- **Finding code structures** across lines: `"try catch finally"` (fuzzy matches across lines)
+- **Important**: This searches CONTENTS, not file names!
 
 ### Multiline Examples
 
-#### File Search Server Multiline
+#### File Search Server Multiline (Content Search)
 ```bash
-# Find JavaScript files containing complete class definitions
-# Note: These are fuzzy matches, not regex patterns
+# With --multiline, searches file CONTENTS instead of names
+# Find files CONTAINING these terms (not in file names)
 ./mcp_fd_server.py filter "class constructor method" "" src --multiline
 
-# Find Python files with specific class and method patterns  
+# Find Python files CONTAINING specific patterns  
 ./mcp_fd_server.py filter "class def return" "" . --multiline
 
-# Find configuration files with database connection blocks
+# Find files CONTAINING database configuration
 ./mcp_fd_server.py filter "database host password" "" config --multiline
 ```
 
 #### Fuzzy Search Server Multiline
 ```bash
-# Find files containing async function definitions
-# IMPORTANT: These are fuzzy matches, NOT regex patterns!
+# search-files with --multiline searches file CONTENTS (not names)
 ./mcp_fuzzy_search.py search-files "async function await" src --multiline
 
-# Search for files with specific multi-line patterns
+# search-content with --multiline treats files as single units
 ./mcp_fuzzy_search.py search-content "try catch finally" . --multiline
 
-# Find files with class definitions containing specific methods
+# Find files CONTAINING class definitions with specific methods
 ./mcp_fuzzy_search.py search-content "class constructor render" src --multiline
 ```
 
@@ -477,21 +495,34 @@ config .json$ | .yaml$ | .toml$ !.bak$ !.old$
 
 When using `fuzzy_search_content`, queries work on the format `file:line:content`:
 
+**Default Mode (matches file paths AND content):**
 ```bash
 # Find implementation TODOs in specific file types
-TODO implement .py: | .js:
+TODO implement .py: | .js:  # Matches TODO in .py or .js files
 
 # Find error handling in specific files
-error 'main.py:' | 'app.js:'
+error 'main.py:' | 'app.js:'  # Matches 'error' in main.py or app.js
+
+# Find updates in test files
+test.py: update  # Matches 'update' in files named test.py
 
 # Find async functions with error handling
-'async def' error .py$
+'async def' error .py$  # Matches in Python files
+```
 
-# Find class definitions excluding test files
-'class ' .py: !test !spec
+**Content-Only Mode (ignores file paths):**
+```bash
+# With --content-only flag or content_only=true parameter
+# These will ONLY match the content, not file names:
 
-# Find imports from specific modules
-'import' react | lodash | numpy
+# Find TODO comments regardless of filename
+TODO implement  # Won't match files named 'TODO.txt'
+
+# Find async/await patterns
+async await catch  # Pure content search
+
+# Find class definitions
+'class ' 'def __init__'  # Won't match 'class.py' filename
 ```
 
 ## ripgrep (rg) Flags Reference
@@ -575,113 +606,129 @@ rg_flags: "-F --no-ignore -t txt -t md -t rst"
 ### File Search Server Tools
 
 #### `search_files`
-Find files using fd with regex or glob patterns.
+Find files by NAME using fd with regex or glob patterns.
+
+**Purpose:** Search for files when you know exact patterns, extensions, or regex for file NAMES.
 
 **Parameters:**
-- `pattern` (required): Regex or glob pattern to match
+- `pattern` (required): Regex or glob pattern to match file names
 - `path` (optional): Directory to search in (defaults to current directory)
 - `flags` (optional): Additional flags to pass to fd
 
 **Example:**
 ```python
 {
-  "pattern": r"\.py$",
+  "pattern": r"\.py$",  # Find files with names ending in .py
   "path": "/home/user/projects",
   "flags": "--hidden --no-ignore"
 }
 ```
 
 #### `filter_files`
-Search for files and filter results using fzf's fuzzy matching.
+Fuzzy search for files by NAME using fzf's fuzzy matching.
+
+**Purpose:** Find files when you only know partial or approximate file NAMES.
 
 **Parameters:**
-- `filter` (required): String to fuzzy match against file paths
-- `pattern` (optional): Initial pattern for fd
+- `filter` (required): Fuzzy search string to match against file names/paths
+- `pattern` (optional): Initial pattern for fd to pre-filter
 - `path` (optional): Directory to search in
 - `first` (optional): Return only the best match
 - `fd_flags` (optional): Extra flags for fd
 - `fzf_flags` (optional): Extra flags for fzf
-- `multiline` (optional): Enable multiline content search (default: false)
+- `multiline` (optional): When true, searches file CONTENTS instead of names (default: false)
 
-**Example:**
+**Example (File Name Search):**
 ```python
 {
-  "filter": "test",
-  "pattern": r"\.py$",
+  "filter": "test",  # Fuzzy match 'test' in file names
+  "pattern": r"\.py$",  # Only Python files
   "path": "./src",
   "first": true
 }
 ```
 
-**Multiline Example:**
+**Multiline Example (Content Search):**
 ```python
 {
-  "filter": "class.*function.*return",
+  "filter": "class function return",  # Find files containing all these terms
   "pattern": "",
   "path": "./src",
-  "multiline": true
+  "multiline": true  # Search CONTENTS, not names
 }
 ```
 
 ### Fuzzy Search Server Tools
 
 #### `fuzzy_search_files`
-Search for file paths using fuzzy matching.
+Search for file NAMES/PATHS using fuzzy matching.
+
+**Purpose:** Find files by NAME when you only know partial names (e.g., "mainpy" finds "main.py").
 
 **Parameters:**
-- `filter` (required): Fuzzy search string
+- `fuzzy_filter` (required): Fuzzy search string for file names/paths
 - `path` (optional): Directory to search in (defaults to current directory)
 - `hidden` (optional): Include hidden files (default: false)
 - `limit` (optional): Maximum results to return (default: 20)
-- `multiline` (optional): Enable multiline file content search (default: false)
+- `multiline` (optional): When true, searches file CONTENTS instead of names (default: false)
 
-**Example:**
+**Example (File Name Search):**
 ```python
 {
-  "filter": "main",
+  "fuzzy_filter": "main",  # Finds main.py, main.js, domain.py, etc.
   "path": "/home/user/projects",
   "hidden": true,
   "limit": 10
 }
 ```
 
-**Multiline Example:**
+**Multiline Example (Content Search):**
 ```python
 {
-  "filter": "import.*export",
+  "fuzzy_filter": "import export",  # Find files containing both terms
   "path": "./src",
-  "multiline": true,
+  "multiline": true,  # Search CONTENTS, not names
   "limit": 5
 }
 ```
 
 #### `fuzzy_search_content`
-Search all file contents using fuzzy filtering.
+Search file CONTENTS using fuzzy filtering, with optional file path matching.
+
+**Purpose:** Find files containing specific text/code using fuzzy search.
 
 **Parameters:**
-- `fuzzy_filter` (required): Fuzzy search query for filtering results (does NOT support regex - use fzf syntax instead, see "fzf Search Syntax Guide" section)
+- `fuzzy_filter` (required): Fuzzy search query for filtering (does NOT support regex - use fzf syntax)
 - `path` (optional): Directory/file to search in (defaults to current directory)
 - `hidden` (optional): Search hidden files (default: false)
 - `limit` (optional): Maximum results to return (default: 20)
 - `rg_flags` (optional): Extra flags for ripgrep (see ripgrep flags reference)
 - `multiline` (optional): Enable multiline record processing (default: false)
+- `content_only` (optional): Match ONLY on content, ignore file paths (default: false)
 
-**Example:**
+**Matching Behavior:**
+- **Default (content_only=false)**: Matches on BOTH file paths AND content (skips line numbers)
+  - Allows filtering like `"test.py: update"` to find "update" in test.py files
+  - Searching `"src TODO"` finds TODO comments in files under src/ directory
+- **With content_only=true**: Matches ONLY on content, ignoring file paths entirely
+  - Pure content search when file paths might interfere
+
+**Example (Default - Path + Content):**
 ```python
 {
-  "fuzzy_filter": "TODO implement",
+  "fuzzy_filter": "test.py: TODO implement",  # Find TODOs in test.py files
   "path": "./src",
   "rg_flags": "-i",
   "limit": 15
 }
 ```
 
-**Multiline Example:**
+**Example (Content Only):**
 ```python
 {
-  "fuzzy_filter": "async await catch",
+  "fuzzy_filter": "async await catch",  # Find these terms in content only
   "path": "./src",
-  "multiline": true,
+  "content_only": true,  # Ignore file paths in matching
   "limit": 10
 }
 ```

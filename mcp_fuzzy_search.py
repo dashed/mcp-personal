@@ -18,13 +18,16 @@ Tools exposed to LLMs
 --------------------
 * **`fuzzy_search_files`** – Search for file paths using fuzzy matching.
 * **`fuzzy_search_content`** – Search file contents with ripgrep, then apply
-  fuzzy filtering to the results.
+  fuzzy filtering to the results. Supports both path+content and content-only modes.
 
 Understanding the Search Pipeline
 --------------------------------
     Files → ripgrep (all lines) → Lines → fzf (fuzzy filter) → Results
                                            ↑
                                     'fuzzy_filter'
+                                    
+Default: Matches on file paths AND content (--nth=1,3..)
+Content-only: Matches ONLY on content (--nth=3..)
 
 CRITICAL FOR AI AGENTS: NO REGEX SUPPORT
 ----------------------------------------
@@ -69,6 +72,7 @@ chmod +x mcp_fuzzy_search.py
 # 1. CLI usage
 ./mcp_fuzzy_search.py search-files "main" src
 ./mcp_fuzzy_search.py search-content "TODO implement" .
+./mcp_fuzzy_search.py search-content "async await" . --content-only
 ./mcp_fuzzy_search.py --examples  # Show usage examples
 
 # 2. Run as MCP server
@@ -444,19 +448,23 @@ def fuzzy_search_files(
         "  hidden (bool, optional): Search hidden files. Default false.\n"
         "  limit (int, optional): Max results to return. Default 20.\n"
         "  rg_flags (str, optional): Extra flags for ripgrep (see below).\n"
-        "  multiline (bool, optional): Enable multiline record processing. Default false.\n\n"
+        "  multiline (bool, optional): Enable multiline record processing. Default false.\n"
+        "  content_only (bool, optional): Match only on content, ignore file paths. Default false.\n\n"
         "Fuzzy Filter Syntax (NO REGEX - these are fzf patterns):\n"
         "  CRITICAL: SPACES MATTER! Each space separates fuzzy patterns (AND logic)\n"
         "  Basic search: 'update_ondemand_max_spend' → finds all occurrences\n"
         "  Multiple terms: 'update spend' → lines with both terms (space = AND)\n"
         "  OR logic: 'update | modify' → lines with either term\n"
-        "  File filtering: 'test.py: update' → only in test.py files\n"
+        "  File filtering: 'test.py: update' → only in test.py files (when content_only=false)\n"
         "  Exact match prefix: 'update → exact (non-fuzzy) match\n"
         "  Exact boundary: ''exact phrase'' → matches at word boundaries\n"
         "  Exclusion: 'update !test' → exclude lines with 'test'\n"
         "  With prefix: '^def update' → lines starting with 'def update'\n"
         "  With suffix: 'update$' → lines ending with 'update'\n"
         "  Escaped spaces: 'TODO:\\\\ fix' → matches literal 'TODO: fix'\n\n"
+        "MATCHING BEHAVIOR:\n"
+        "  Default (content_only=false): Matches on file path AND content (skips line numbers)\n"
+        "  With content_only=true: Matches ONLY on content, ignores file paths\n\n"
         "UNDERSTANDING SPACES - CRITICAL FOR PRECISE SEARCHES:\n"
         "  'def update_method' → Lines containing the exact pattern 'def update_method'\n"
         "  'def update method' → Lines containing 'def' AND 'update' AND 'method' (3 patterns!)\n"
@@ -500,8 +508,13 @@ def fuzzy_search_content(
     limit: int = 20,
     rg_flags: str = "",
     multiline: bool = False,
+    content_only: bool = False,
 ) -> dict[str, Any]:
-    """Search all content then apply fuzzy filtering - similar to 'rg . | fzf'."""
+    """Search all content then apply fuzzy filtering - similar to 'rg . | fzf'.
+    
+    By default, matches on both file paths AND content (skips line numbers).
+    With content_only=True, matches ONLY on content, ignoring file paths.
+    """
     if not fuzzy_filter:
         return {"error": "'fuzzy_filter' argument is required"}
 
@@ -620,7 +633,13 @@ def fuzzy_search_content(
             rg_cmd.extend([".", search_path])  # Always search all lines
 
             # Pipe through fzf for fuzzy filtering
-            fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter, "--delimiter", ":"]
+            # Default: match on file path (field 1) and content (field 3+), skip line number
+            if content_only:
+                # Match only on content (field 3+), ignore file path and line number
+                fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter, "--delimiter", ":", "--nth=3.."]
+            else:
+                # Match on file path (field 1) and content (field 3+), skip line number
+                fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter, "--delimiter", ":", "--nth=1,3.."]
 
             logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
@@ -723,7 +742,15 @@ FUZZY SEARCH EXAMPLES
 5. Search with case-insensitive matching:
    $ ./mcp_fuzzy_search.py search-content "config" --rg-flags "-i"
 
-6. SPACES MATTER - Find files named 'test' with no extension in temp dir:
+6. CONTENT-ONLY MODE - Search content without matching file paths:
+   $ ./mcp_fuzzy_search.py search-content "test" --content-only
+   # Won't match files named 'test.py', only content with 'test'
+
+7. DEFAULT MODE - Match both file paths AND content:
+   $ ./mcp_fuzzy_search.py search-content "test.py: update"
+   # Finds 'update' in files named test.py
+
+8. SPACES MATTER - Find files named 'test' with no extension in temp dir:
    $ ./mcp_fuzzy_search.py search-files "temp /test$"  # Space before /test$ is critical!
    vs
    $ ./mcp_fuzzy_search.py search-files "temp/test$"   # Different! Looks for 'temp/test' at end
@@ -760,13 +787,23 @@ UNDERSTANDING THE PIPELINE
 Files → ripgrep (all lines) → Lines → fzf (fuzzy_filter) → Results
                                          ↑
                                    fuzzy search (NO REGEX!)
+
+MATCHING BEHAVIOR
+================
+Default mode: Matches on file paths (field 1) AND content (field 3+)
+  - Allows filtering like "test.py: update" to find updates in test.py files
+  - Line numbers (field 2) are always skipped to prevent accidental matches
+
+Content-only mode (--content-only): Matches ONLY on content (field 3+)
+  - Pure content search when file paths might interfere
+  - Useful when searching for terms that might appear in filenames
 """
     print(examples)
 
 
 def _cli() -> None:
     parser = argparse.ArgumentParser(
-        description="Fuzzy search with ripgrep + fzf",
+        description="Fuzzy search with ripgrep + fzf. Default matches file paths AND content.",
         epilog="fzf syntax: 'term1 term2' (AND), 'a | b' (OR), '^start', 'end$', '!exclude'",
     )
 
@@ -806,6 +843,9 @@ def _cli() -> None:
     p_content.add_argument(
         "--multiline", action="store_true", help="Multiline record processing"
     )
+    p_content.add_argument(
+        "--content-only", action="store_true", help="Match only on content, ignore file paths"
+    )
 
     ns = parser.parse_args()
 
@@ -830,6 +870,7 @@ def _cli() -> None:
             ns.limit,
             ns.rg_flags,
             ns.multiline,
+            ns.content_only,
         )
 
     print(json.dumps(res, indent=2))

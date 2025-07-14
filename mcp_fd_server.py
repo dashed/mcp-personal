@@ -6,17 +6,36 @@
 # [project.optional-dependencies]
 # dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
 # ///
-"""
-`mcp_fd_server.py` – Minimal but complete **Model Context Protocol** server
-(implemented with the official **FastMCP** helper that ships inside the
-`mcp` Python SDK) exposing two file‑search tools powered by **fd** and
-**fzf**.
 
-Tools exposed to LLMs
---------------------
-* **`search_files`** – list files using `fd` (fast `find`).
-* **`filter_files`** – pipe the `fd` output through `fzf --filter` for fuzzy,
-  *headless* matching (perfect for non‑interactive stdio environments).
+# ==============================================================================
+# FUZZY FILE NAME SEARCH SERVER - Find files by name using fuzzy matching
+# ==============================================================================
+# Keywords: fuzzy search, file finder, fuzzy file name search, file discovery, fzf
+# Purpose: MCP server for finding files by NAME (not content) using fuzzy matching
+# What it does: Searches file names/paths - NOT file contents
+# ==============================================================================
+"""
+Fuzzy File NAME Search Server for Model Context Protocol (MCP)
+==============================================================
+
+This server helps AI agents find files by their NAMES/PATHS using fuzzy matching.
+It searches file names, NOT file contents (use grep/ripgrep for content search).
+
+AI AGENT QUICK REFERENCE
+------------------------
+**What this does**: Find files by NAME using fuzzy patterns (NOT content search)
+**When to use**: When you need to locate files but only know partial names
+**Key capability**: Fuzzy name matching - finds "main.py" by searching "mainpy"
+
+Tools Provided
+--------------
+1. **`search_files`** – Find files using patterns (regex/glob via fd)
+   - Use for: Exact patterns, file extensions, regex matches
+   - Example: Search "\.py$" to find all Python files
+
+2. **`filter_files`** – Fuzzy search through file paths (powered by fzf)
+   - Use for: Finding files with partial/fuzzy names
+   - Example: Filter "mainpy" finds "main.py", "main_py.txt", etc.
 
 CRITICAL FOR AI AGENTS: NO REGEX IN FZF FILTER
 ----------------------------------------------
@@ -31,38 +50,33 @@ Each space separates fuzzy patterns with AND logic:
 - 'temp /test$' → Files with 'temp' AND ending with '/test'
 - 'foo\\ bar' → Files containing literal 'foo bar' (escaped space)
 
-ADVANCED FZF FEATURES (from source code analysis)
-------------------------------------------------
+Common Use Cases for AI Agents (File Name Search)
+-------------------------------------------------
+- Finding config files by name: filter "config json$"
+- Locating test files by name: filter "test py$" or search "test.*\.py$"
+- Finding component files: filter "button component"
+- Finding files in specific dirs: filter "^src/ controller"
+- Finding files with partial names: filter "usr ctrl" (finds UserController.js)
+
+Technical Details
+-----------------
+* Powered by fd (fast file finder) and fzf (fuzzy finder)
+* Returns results as JSON for programmatic processing
+* Supports multiline content search for advanced use cases
+* All errors returned as structured JSON
+
+ADVANCED FZF FEATURES
+--------------------
 - Smart Case: Case-insensitive by default, case-sensitive if query has uppercase
 - Latin Normalization: Accented chars normalized (café → cafe)
-- Exact Boundary Match: ''word'' matches at word boundaries (_ is boundary)
-- Scoring: Matches at special positions (boundaries, separators) score higher
+- Exact Boundary Match: ''word'' matches at word boundaries
+- Scoring: Matches at special positions score higher
 
-Quick start
------------
-```bash
-# Make sure binaries are on PATH first
-brew install fd fzf bat      # macOS example
-# or apt install fd-find fzf bat   # Debian/Ubuntu (symlink fdfind→fd)
-
-chmod +x mcp_fd_server.py    # mark as executable
-
-# 1. Stand‑alone CLI helper
-./mcp_fd_server.py search "\\.py$" src --flags "--hidden"  # lists .py files
-./mcp_fd_server.py filter main "" . --first                # best fuzzy match
-
-# 2. Run as MCP stdio server (for Claude Code / Inspector)
-./mcp_fd_server.py           # blocks, prints MCP init JSON
-```
-
-Internals
----------
-* Uses **FastMCP** for attribute‑based discovery (`@mcp.tool`). No manual
-  server boilerplate needed—just call `mcp.run()`.
-* Shebang **uv run --script** + inline `[dependencies]` block means the first
-  launch automatically installs the `mcp` SDK into an isolated cache.
-* All error cases return structured JSON `{ "error": "..." }` so the LLM can
-  react programmatically.
+Implementation Notes
+--------------------
+* Uses FastMCP for automatic tool discovery
+* Requires fd and fzf binaries installed on system
+* Cross-platform path normalization for consistency
 """
 
 from __future__ import annotations
@@ -179,11 +193,17 @@ mcp = FastMCP("fd-fzf")
 
 @mcp.tool(
     description=(
-        "Find files using *fd*.\n\n"
+        "Search for files using patterns (powered by fd - a fast file finder).\n\n"
+        "PURPOSE: Find files when you know exact patterns, extensions, or regex.\n"
+        "NOT FUZZY: This uses exact pattern matching, not fuzzy search.\n\n"
         "Args:\n"
-        "  pattern (str): Regex or glob to match. Required.\n"
-        "  path    (str, optional): Directory to search. Defaults to current dir.\n"
-        "  flags   (str, optional): Extra flags forwarded to fd.\n\n"
+        "  pattern (str): Regex or glob pattern to match filenames. Required.\n"
+        "  path    (str, optional): Directory to search in. Defaults to current dir.\n"
+        "  flags   (str, optional): Extra flags for fd (e.g., '--hidden' for hidden files).\n\n"
+        "Examples:\n"
+        "  pattern='\.py$' - Find all Python files\n"
+        "  pattern='test_.*\.js$' - Find JavaScript test files\n"
+        "  pattern='config' - Find files with 'config' in the name\n\n"
         "Returns: { matches: string[] } or { error: string }"
     )
 )
@@ -218,45 +238,43 @@ def search_files(
 
 @mcp.tool(
     description=(
-        "Run fd, then fuzzy‑filter with fzf --filter.\n\n"
-        "IMPORTANT: NO REGEX SUPPORT in 'filter' - use fzf's fuzzy syntax, NOT regular expressions!\n\n"
+        "Fuzzy search for files by NAME using fzf (fuzzy finder).\n\n"
+        "PURPOSE: Find files when you only know partial or approximate file names.\n"
+        "FUZZY MATCHING: Searches file NAMES/PATHS, not file contents!\n\n"
+        "IMPORTANT: NO REGEX SUPPORT in 'filter' - use fzf's fuzzy syntax!\n\n"
         "Args:\n"
-        "  filter (str): fzf query string (NOT regex!). Required.\n"
-        "  pattern (str, optional): Pattern for fd (empty = list all).\n"
+        "  filter (str): Fuzzy search query for file names/paths. Required.\n"
+        "  pattern (str, optional): Pre-filter with fd pattern (empty = all files).\n"
         "  path    (str, optional): Directory to search. Defaults to current dir.\n"
         "  first   (bool, optional): Return only the best match. Default false.\n"
         "  fd_flags  (str, optional): Extra flags for fd.\n"
         "  fzf_flags (str, optional): Extra flags for fzf.\n"
-        "  multiline (bool, optional): Enable multiline support for file content. Default false.\n\n"
-        "fzf Query Syntax (NO REGEX SUPPORT):\n"
-        "  CRITICAL: SPACES SEPARATE PATTERNS! Each space creates a new fuzzy pattern\n"
-        "  Basic: 'term1 term2' (AND logic), 'term1 | term2' (OR logic)\n"
-        "  Exact prefix: 'term → exact (non-fuzzy) match\n"
-        "  Exact boundary: ''term'' → matches at word boundaries\n"
-        "  Position: '^start' (prefix), 'end$' (suffix), '^exact$' (equal)\n"
-        "  Negation: '!exclude' (NOT), '!^prefix' (NOT prefix), '!end$' (NOT suffix)\n"
-        "  Escaped spaces: 'foo\\\\ bar' → matches literal 'foo bar'\n\n"
-        "UNDERSTANDING SPACES (Critical for precise filtering!):\n"
-        "  'temp/test$' → Files with paths ending in 'temp/test'\n"
-        "  'temp /test$' → Files with 'temp' in path AND ending with '/test' (space matters!)\n"
-        "  'dir test.txt' → Files with 'dir' AND 'test.txt' anywhere in path\n"
-        "  'dir/test.txt' → Files with 'dir/test.txt' as one pattern\n"
-        "  'My\\\\ Documents' → Files with literal 'My Documents' in path\n\n"
-        "Examples:\n"
-        "  'config .json$' → Files with 'config' AND ending with '.json'\n"
-        "  '^src py$ | js$ | go$' → Files in src/ ending with .py, .js, or .go\n"
-        "  ''main.py'' !test' → Exact 'main.py' but not containing 'test'\n\n"
+        "  multiline (bool, optional): Search file CONTENTS (not just names). Default false.\n\n"
+        "FUZZY FILE NAME MATCHING:\n"
+        "  'mainpy' → Finds: main.py, main_py.txt, domain.py, etc.\n"
+        "  'confjs' → Finds: config.js, conf.js, configure.js, etc.\n"
+        "  'test spec' → Finds files with both 'test' AND 'spec' in the path\n\n"
+        "fzf Query Syntax:\n"
+        "  SPACES SEPARATE PATTERNS! Each space = AND condition\n"
+        "  Basic: 'term1 term2' (AND), 'term1 | term2' (OR)\n"
+        "  Exact: 'exact → exact match (not fuzzy)\n"
+        "  Boundary: ''main.py'' → exact word boundaries\n"
+        "  Position: '^src' (starts with), '.py$' (ends with)\n"
+        "  Exclude: '!test' (NOT test), '!.spec$' (NOT ending in .spec)\n"
+        "  Literal space: 'My\\\\ Documents' → 'My Documents'\n\n"
+        "Examples for Finding Files by Name:\n"
+        "  'config json$' → Config files ending in .json\n"
+        "  'test !spec' → Test files but not spec files\n"
+        "  '^src/ component tsx$' → React components in src/\n"
+        "  'button | modal | dialog' → UI component files\n\n"
         "COMMON MISTAKES:\n"
-        "  ✗ 'class.*method' → WRONG! This is regex\n"
-        "  ✓ 'class method' → CORRECT! Fuzzy matches both\n"
-        "  ✗ '\\\\w+\\\\.py$' → WRONG! Regex not supported\n"
+        "  ✗ '.*\\\\.py$' → WRONG! This is regex\n"
         "  ✓ '.py$' → CORRECT! Files ending with .py\n"
-        "  ✗ 'My Documents' → WRONG! Matches 'My' AND 'Documents' separately\n"
-        "  ✓ 'My\\\\ Documents' → CORRECT! Matches literal 'My Documents'\n\n"
-        "Multiline Mode:\n"
-        "  When enabled, processes file contents as multiline records using null delimiters.\n"
-        "  Useful for filtering entire file contents, code blocks, or structured data.\n"
-        "  Automatically adds --read0 --print0 flags to fzf for safe multiline handling.\n\n"
+        "  ✗ 'My Documents' → Matches 'My' AND 'Documents' separately\n"
+        "  ✓ 'My\\\\ Documents' → Matches literal 'My Documents'\n\n"
+        "Multiline Mode (Advanced):\n"
+        "  When enabled, searches file CONTENTS instead of just names.\n"
+        "  Useful for finding files containing specific code/text.\n\n"
         "Returns: { matches: string[] } or { error: string }"
     )
 )
