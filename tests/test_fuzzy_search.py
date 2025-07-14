@@ -334,36 +334,39 @@ async def test_fuzzy_search_content_default_vs_content_only(tmp_path: Path):
     (tmp_path / "main.py").write_text("def test():\n    pass")
 
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
-        # Test 1: Default mode - should match both file paths AND content
+        # Test 1: Default mode - search for "update" which should match both filename and content
         result_default = await client.call_tool(
             "fuzzy_search_content",
             {
-                "fuzzy_filter": "test.py: update",  # Should match update() in test.py
+                "fuzzy_filter": "update",  # Should match update.py filename AND update() content
                 "path": str(tmp_path),
             },
         )
         data_default = json.loads(result_default.content[0].text)
 
-        # Test 2: Content-only mode - should NOT match based on file paths
+        # Test 2: Content-only mode - same search but content-only
         result_content_only = await client.call_tool(
             "fuzzy_search_content",
             {
-                "fuzzy_filter": "test.py: update",  # Won't match since it's content-only
+                "fuzzy_filter": "update",  # Should only match update() content, not filename
                 "path": str(tmp_path),
                 "content_only": True,
             },
         )
         data_content_only = json.loads(result_content_only.content[0].text)
 
-        # Default mode should find the match
-        assert len(data_default["matches"]) >= 1
-        assert any(
-            "test.py" in match["file"] and "update" in match["content"]
-            for match in data_default["matches"]
-        )
+        # Default mode should find matches in both file paths and content
+        # Should find update.py file AND update() function in test.py
+        assert len(data_default["matches"]) >= 2
+        files_found = [match["file"] for match in data_default["matches"]]
+        assert any("update.py" in f for f in files_found)  # Filename match
+        assert any("test.py" in f for f in files_found)  # Content match
 
-        # Content-only mode should find nothing (the pattern doesn't exist in content)
-        assert len(data_content_only["matches"]) == 0
+        # Content-only mode should only find the content match (update() in test.py)
+        # Should NOT find update.py (filename match is ignored)
+        assert len(data_content_only["matches"]) == 1
+        assert data_content_only["matches"][0]["file"].endswith("test.py")
+        assert "update" in data_content_only["matches"][0]["content"]
 
 
 async def test_fuzzy_search_content_only_mode(tmp_path: Path):
