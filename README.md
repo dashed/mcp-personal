@@ -20,7 +20,7 @@ Advanced search with both file name and content capabilities using `ripgrep` and
 - **Fuzzy filtering** of results using `fzf --filter`
 - **Two distinct modes**: 
   - `fuzzy_search_files`: Search file NAMES/paths
-  - `fuzzy_search_content`: Search file CONTENTS
+  - `fuzzy_search_content`: Search file CONTENTS with path+content matching by default
 - **Simplified interface** - just provide fuzzy search terms (NO regex support)
 - **Multiline record processing** for complex pattern matching
 - **Standalone CLI** for testing and direct usage
@@ -299,7 +299,7 @@ Once configured in Claude Desktop, you can use natural language for advanced sea
 - "Search for configuration files containing database settings"
 - "Find method definitions named 'update_ondemand_max_spend'"
 - "Search for async functions with error handling"
-- "Search for 'update' in test.py files only" (uses path+content matching)
+- "Search for 'update' in test.py files only" (works because default mode matches paths too!)
 - "Search for 'async' in content only, ignore file paths" (use content_only mode)
 
 #### CLI Usage
@@ -693,9 +693,9 @@ Search for file NAMES/PATHS using fuzzy matching.
 ```
 
 #### `fuzzy_search_content`
-Search file CONTENTS using fuzzy filtering, with optional file path matching.
+Search file contents with fuzzy filtering, matching on BOTH file paths AND content by default.
 
-**Purpose:** Find files containing specific text/code using fuzzy search.
+**Purpose:** Find specific text/code using fuzzy search that considers both where it is (path) and what it is (content).
 
 **Parameters:**
 - `fuzzy_filter` (required): Fuzzy search query for filtering (does NOT support regex - use fzf syntax)
@@ -708,10 +708,11 @@ Search file CONTENTS using fuzzy filtering, with optional file path matching.
 
 **Matching Behavior:**
 - **Default (content_only=false)**: Matches on BOTH file paths AND content (skips line numbers)
-  - Allows filtering like `"test.py: update"` to find "update" in test.py files
+  - This is why `"test.py: update"` finds "update" in test.py files - it matches the path!
   - Searching `"src TODO"` finds TODO comments in files under src/ directory
+  - Even just `"update"` will match files named "update.py" OR containing "update"
 - **With content_only=true**: Matches ONLY on content, ignoring file paths entirely
-  - Pure content search when file paths might interfere
+  - Pure content search - `"update"` won't match "update.py" filename, only content
 
 **Example (Default - Path + Content):**
 ```python
