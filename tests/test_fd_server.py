@@ -173,11 +173,15 @@ async def test_list_tools():
         filter_tool = next(t for t in result.tools if t.name == "filter_files")
 
         # Verify search_files metadata
-        assert search_tool.description.startswith("Find files using *fd*")
+        assert search_tool.description.startswith(
+            "Search for files using patterns (powered by fd"
+        )
         assert "pattern" in search_tool.inputSchema["required"]
 
         # Verify filter_files metadata
-        assert filter_tool.description.startswith("Run fd, then fuzzy")
+        assert filter_tool.description.startswith(
+            "Fuzzy search for files by NAME using fzf"
+        )
         assert "filter" in filter_tool.inputSchema["required"]
 
 

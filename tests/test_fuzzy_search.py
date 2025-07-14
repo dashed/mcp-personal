@@ -323,6 +323,79 @@ async def test_fuzzy_search_content_case_sensitive(tmp_path: Path):
         assert len(data["matches"]) >= 2
 
 
+async def test_fuzzy_search_content_default_vs_content_only(tmp_path: Path):
+    """Test the difference between default and content-only modes."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Create test files with names that might interfere with content search
+    (tmp_path / "test.py").write_text("def update():\n    pass")
+    (tmp_path / "update.py").write_text("def check():\n    pass")
+    (tmp_path / "main.py").write_text("def test():\n    pass")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        # Test 1: Default mode - should match both file paths AND content
+        result_default = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "fuzzy_filter": "test.py: update",  # Should match update() in test.py
+                "path": str(tmp_path),
+            },
+        )
+        data_default = json.loads(result_default.content[0].text)
+
+        # Test 2: Content-only mode - should NOT match based on file paths
+        result_content_only = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "fuzzy_filter": "test.py: update",  # Won't match since it's content-only
+                "path": str(tmp_path),
+                "content_only": True,
+            },
+        )
+        data_content_only = json.loads(result_content_only.content[0].text)
+
+        # Default mode should find the match
+        assert len(data_default["matches"]) >= 1
+        assert any(
+            "test.py" in match["file"] and "update" in match["content"]
+            for match in data_default["matches"]
+        )
+
+        # Content-only mode should find nothing (the pattern doesn't exist in content)
+        assert len(data_content_only["matches"]) == 0
+
+
+async def test_fuzzy_search_content_only_mode(tmp_path: Path):
+    """Test content-only mode ignores file paths in matching."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Create files where filenames might match but content doesn't
+    (tmp_path / "async.py").write_text("def sync_function():\n    return 42")
+    (tmp_path / "sync.py").write_text("async def fetch_data():\n    return await api()")
+    (tmp_path / "main.py").write_text("# No word here\ndef main():\n    pass")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        # Search for "async" with content-only mode
+        result = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "fuzzy_filter": "async",
+                "path": str(tmp_path),
+                "content_only": True,
+            },
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "matches" in data
+
+        # Should only find the file with "async" in content, not in filename
+        assert len(data["matches"]) == 1
+        assert data["matches"][0]["file"].endswith("sync.py")
+        assert "async def" in data["matches"][0]["content"]
+
+
 async def test_error_handling():
     """Test error handling for missing arguments."""
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
@@ -418,6 +491,27 @@ def test_cli_help():
     assert "search-content" in result.stdout
 
 
+def test_cli_content_only_flag():
+    """Test CLI --content-only flag."""
+    # Test that the flag is accepted and passed correctly
+    with patch("mcp_fuzzy_search.fuzzy_search_content") as mock_search:
+        mock_search.return_value = {"matches": []}
+
+        with patch(
+            "sys.argv",
+            ["mcp_fuzzy_search.py", "search-content", "test", ".", "--content-only"],
+        ):
+            mcp_fuzzy_search._cli()
+
+        # Verify content_only=True was passed
+        mock_search.assert_called_once()
+        call_args = mock_search.call_args
+        # Check the content_only parameter
+        assert call_args[1].get("content_only") is True or (
+            len(call_args[0]) > 6 and call_args[0][6] is True
+        )
+
+
 def test_require_binary():
     """Test the _require helper function."""
     # Valid binary
@@ -509,6 +603,48 @@ async def test_fuzzy_search_content_mocked(mock_popen):
             assert data["matches"][0]["file"] == "src/app.py"
             assert data["matches"][0]["line"] == 10
             assert "implement feature" in data["matches"][0]["content"]
+
+            # Verify fzf was called with --nth=1,3.. by default
+            fzf_call_args = mock_popen.call_args_list[1][0][0]
+            assert "--nth=1,3.." in fzf_call_args
+
+
+@patch("subprocess.Popen")
+async def test_fuzzy_search_content_mocked_content_only(mock_popen):
+    """Test fuzzy_search_content with content_only mode."""
+    # Mock ripgrep process
+    rg_proc = MagicMock()
+    rg_proc.stdout = MagicMock()
+    rg_proc.stderr = MagicMock()
+    rg_proc.stderr.read.return_value = b""
+    rg_proc.wait.return_value = 0
+    rg_proc.returncode = 0
+
+    # Mock fzf process
+    fzf_proc = MagicMock()
+    fzf_proc.communicate.return_value = (
+        "src/sync.py:1:async def fetch():\n",
+        "",
+    )
+
+    mock_popen.side_effect = [rg_proc, fzf_proc]
+
+    with (
+        patch.object(mcp_fuzzy_search, "RG_EXECUTABLE", "/mock/rg"),
+        patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"),
+    ):
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_content",
+                {"fuzzy_filter": "async", "path": ".", "content_only": True},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert len(data["matches"]) == 1
+
+            # Verify fzf was called with --nth=3.. for content-only mode
+            fzf_call_args = mock_popen.call_args_list[1][0][0]
+            assert "--nth=3.." in fzf_call_args
 
 
 # Multiline support tests

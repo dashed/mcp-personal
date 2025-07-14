@@ -31,7 +31,7 @@ Tools Provided
 --------------
 1. **`search_files`** – Find files using patterns (regex/glob via fd)
    - Use for: Exact patterns, file extensions, regex matches
-   - Example: Search "\.py$" to find all Python files
+   - Example: Search "\\.py$" to find all Python files
 
 2. **`filter_files`** – Fuzzy search through file paths (powered by fzf)
    - Use for: Finding files with partial/fuzzy names
@@ -53,7 +53,7 @@ Each space separates fuzzy patterns with AND logic:
 Common Use Cases for AI Agents (File Name Search)
 -------------------------------------------------
 - Finding config files by name: filter "config json$"
-- Locating test files by name: filter "test py$" or search "test.*\.py$"
+- Locating test files by name: filter "test py$" or search "test.*\\.py$"
 - Finding component files: filter "button component"
 - Finding files in specific dirs: filter "^src/ controller"
 - Finding files with partial names: filter "usr ctrl" (finds UserController.js)
@@ -201,8 +201,8 @@ mcp = FastMCP("fd-fzf")
         "  path    (str, optional): Directory to search in. Defaults to current dir.\n"
         "  flags   (str, optional): Extra flags for fd (e.g., '--hidden' for hidden files).\n\n"
         "Examples:\n"
-        "  pattern='\.py$' - Find all Python files\n"
-        "  pattern='test_.*\.js$' - Find JavaScript test files\n"
+        "  pattern='\\.py$' - Find all Python files\n"
+        "  pattern='test_.*\\.js$' - Find JavaScript test files\n"
         "  pattern='config' - Find files with 'config' in the name\n\n"
         "Returns: { matches: string[] } or { error: string }"
     )

@@ -25,7 +25,7 @@ Understanding the Search Pipeline
     Files → ripgrep (all lines) → Lines → fzf (fuzzy filter) → Results
                                            ↑
                                     'fuzzy_filter'
-                                    
+
 Default: Matches on file paths AND content (--nth=1,3..)
 Content-only: Matches ONLY on content (--nth=3..)
 
@@ -511,7 +511,7 @@ def fuzzy_search_content(
     content_only: bool = False,
 ) -> dict[str, Any]:
     """Search all content then apply fuzzy filtering - similar to 'rg . | fzf'.
-    
+
     By default, matches on both file paths AND content (skips line numbers).
     With content_only=True, matches ONLY on content, ignoring file paths.
     """
@@ -636,10 +636,24 @@ def fuzzy_search_content(
             # Default: match on file path (field 1) and content (field 3+), skip line number
             if content_only:
                 # Match only on content (field 3+), ignore file path and line number
-                fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter, "--delimiter", ":", "--nth=3.."]
+                fzf_cmd: list[str] = [
+                    fzf_bin,
+                    "--filter",
+                    fuzzy_filter,
+                    "--delimiter",
+                    ":",
+                    "--nth=3..",
+                ]
             else:
                 # Match on file path (field 1) and content (field 3+), skip line number
-                fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter, "--delimiter", ":", "--nth=1,3.."]
+                fzf_cmd: list[str] = [
+                    fzf_bin,
+                    "--filter",
+                    fuzzy_filter,
+                    "--delimiter",
+                    ":",
+                    "--nth=1,3..",
+                ]
 
             logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
@@ -844,7 +858,9 @@ def _cli() -> None:
         "--multiline", action="store_true", help="Multiline record processing"
     )
     p_content.add_argument(
-        "--content-only", action="store_true", help="Match only on content, ignore file paths"
+        "--content-only",
+        action="store_true",
+        help="Match only on content, ignore file paths",
     )
 
     ns = parser.parse_args()
