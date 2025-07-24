@@ -21,6 +21,8 @@ Advanced search with both file name and content capabilities using `ripgrep` and
 - **Two distinct modes**: 
   - `fuzzy_search_files`: Search file NAMES/paths
   - `fuzzy_search_content`: Search file CONTENTS with path+content matching by default
+- **PDF and document search** (optional) - search through PDFs, Office docs, and archives using `ripgrep-all`
+- **PDF page extraction** (optional) - extract specific pages from PDFs as markdown using `pdf2txt.py` + `pandoc`
 - **Simplified interface** - just provide fuzzy search terms (NO regex support)
 - **Multiline record processing** for complex pattern matching
 - **Standalone CLI** for testing and direct usage
@@ -39,6 +41,18 @@ SQLite database operations with configurable read/write permissions:
 ### General Requirements
 - Python 3.10 or higher
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
+
+To install uv:
+```bash
+# macOS/Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or using pip (if you already have Python)
+pip install uv
+```
+
+### Note on Optional Features
+The PDF search and extraction tools in the Fuzzy Search Server are **optional**. The server will work without these binaries installed - only the PDF-specific tools will be unavailable. This allows you to use the core fuzzy search functionality without requiring all dependencies.
 
 ### File Search Server Requirements
 The file search server requires the following command-line tools:
@@ -64,16 +78,32 @@ The fuzzy search server requires:
 #### macOS
 ```bash
 brew install ripgrep fzf
+
+# For PDF search capabilities (optional)
+brew install ripgrep-all pandoc
+uv tool install pdfminer.six
 ```
 
 #### Ubuntu/Debian
 ```bash
 sudo apt install ripgrep fzf
+
+# For PDF search capabilities (optional)
+# Install ripgrep-all
+cargo install ripgrep-all  # Requires Rust/cargo
+
+# Install pdfminer.six
+uv tool install pdfminer.six
+
+# Install pandoc
+sudo apt install pandoc
 ```
 
 #### Other Systems
 - [ripgrep installation guide](https://github.com/BurntSushi/ripgrep#installation)
 - [fzf installation guide](https://github.com/junegunn/fzf#installation)
+- [ripgrep-all installation](https://github.com/phiresky/ripgrep-all#installation) (optional, for PDF search)
+- [pandoc installation](https://pandoc.org/installing.html) (optional, for PDF extraction)
 
 ## Installation
 
@@ -223,13 +253,15 @@ Once the inspector is running:
 
 1. **Navigate to the web interface** (usually http://localhost:6274)
 2. **Explore the tabs**:
-   - **Tools**: Test `search_files`, `filter_files`, `fuzzy_search_files`, `fuzzy_search_content`
+   - **Tools**: Test `search_files`, `filter_files`, `fuzzy_search_files`, `fuzzy_search_content`, `fuzzy_search_documents`, `extract_pdf_pages`
    - **Resources**: View any exposed resources (if implemented)
    - **Prompts**: Test any exposed prompts (if implemented)
 3. **Test different scenarios**:
    - Try various search patterns and filters
    - Test multiline functionality
    - Experiment with different file paths and flags
+   - Test PDF search with `fuzzy_search_documents` (if binaries installed)
+   - Test PDF page extraction with `extract_pdf_pages` (if binaries installed)
    - Validate error handling with invalid inputs
 
 #### Advanced Configuration
@@ -301,6 +333,9 @@ Once configured in Claude Desktop, you can use natural language for advanced sea
 - "Search for async functions with error handling"
 - "Search for 'update' in test.py files only" (works because default mode matches paths too!)
 - "Search for 'async' in content only, ignore file paths" (use content_only mode)
+- "Search for 'vector' in PDF documents" (requires ripgrep-all)
+- "Find all references to 'machine learning' in PDFs and Word documents"
+- "Extract pages 5-10 from the user manual PDF"
 
 #### CLI Usage
 
@@ -328,6 +363,16 @@ The fuzzy search server also works as a standalone CLI tool:
 # search-content --multiline: Treats whole files as searchable units
 ./mcp_fuzzy_search.py search-content "async await" . --multiline  # Find files with both terms anywhere
 ./mcp_fuzzy_search.py search-content "try catch" . --multiline --content-only  # Content-only + multiline
+
+# PDF and document search (requires optional binaries)
+./mcp_fuzzy_search.py search-documents "machine learning" .  # Search PDFs and docs
+./mcp_fuzzy_search.py search-documents "invoice total" invoices/ --file-types "pdf"  # PDFs only
+./mcp_fuzzy_search.py search-documents "contract" . --file-types "pdf,docx" --limit 5
+
+# Extract specific pages from PDFs (requires optional binaries)
+./mcp_fuzzy_search.py extract-pdf manual.pdf "1,3,5-7"  # Extract pages 1, 3, 5, 6, 7
+./mcp_fuzzy_search.py extract-pdf report.pdf "10-20" --format html  # Extract as HTML
+./mcp_fuzzy_search.py extract-pdf thesis.pdf "100-105" --preserve-layout  # Keep layout
 ```
 
 ### SQLite Server
@@ -731,6 +776,48 @@ Search file contents with fuzzy filtering, matching on BOTH file paths AND conte
   "path": "./src",
   "content_only": true,  # Ignore file paths in matching
   "limit": 10
+}
+```
+
+#### `fuzzy_search_documents`
+Search through PDFs and other document formats using ripgrep-all (requires optional binaries).
+
+**Purpose:** Search PDFs, Office documents, archives, and other binary formats that regular text search can't handle.
+
+**Parameters:**
+- `fuzzy_filter` (required): Fuzzy search query for document content
+- `path` (optional): Directory/file to search in (defaults to current directory)
+- `file_types` (optional): Comma-separated file types to search (e.g., "pdf,docx,epub")
+- `preview` (optional): Include preview context (default: true)
+- `limit` (optional): Maximum results to return (default: 20)
+
+**Example:**
+```python
+{
+  "fuzzy_filter": "machine learning algorithm",
+  "path": "./research",
+  "file_types": "pdf,epub",
+  "limit": 10
+}
+```
+
+#### `extract_pdf_pages`
+Extract specific pages from a PDF and convert to various formats (requires optional binaries).
+
+**Purpose:** Extract individual pages or page ranges from PDFs and convert them to readable formats like markdown.
+
+**Parameters:**
+- `file` (required): Path to PDF file
+- `pages` (required): Comma-separated page numbers or ranges (e.g., "1,3,5-10")
+- `format` (optional): Output format - markdown, html, plain, latex, docx (default: markdown)
+- `preserve_layout` (optional): Try to preserve original layout (default: false)
+
+**Example:**
+```python
+{
+  "file": "research_paper.pdf",
+  "pages": "1,5-10,15",
+  "format": "markdown"
 }
 ```
 

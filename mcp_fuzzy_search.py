@@ -86,6 +86,7 @@ import argparse
 import json
 import logging
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -104,6 +105,9 @@ logger = logging.getLogger(__name__)
 
 RG_EXECUTABLE: str | None = shutil.which("rg")
 FZF_EXECUTABLE: str | None = shutil.which("fzf")
+RGA_EXECUTABLE: str | None = shutil.which("rga")
+PDF2TXT_EXECUTABLE: str | None = shutil.which("pdf2txt.py")
+PANDOC_EXECUTABLE: str | None = shutil.which("pandoc")
 
 # Platform detection
 IS_WINDOWS = platform.system() == "Windows"
@@ -731,6 +735,258 @@ def fuzzy_search_content(
 
 
 # ---------------------------------------------------------------------------
+# Tool: fuzzy_search_documents
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    description=(
+        "Search through PDFs and other document formats using ripgrep-all.\n\n"
+        "Searches through PDFs, Office docs, archives, and more using rga (ripgrep-all).\n"
+        "Supports fuzzy filtering of results with fzf.\n\n"
+        "Args:\n"
+        "  fuzzy_filter (str): Fuzzy search query. Required.\n"
+        "  path (str, optional): Directory/file to search. Default: current dir.\n"
+        "  file_types (str, optional): Comma-separated file types (pdf,docx,epub).\n"
+        "  preview (bool, optional): Include preview context. Default: true.\n"
+        "  limit (int, optional): Max results. Default: 20.\n\n"
+        "Returns: { matches: Array<{file, page, content, match_text}> } or { error: string }"
+    )
+)
+def fuzzy_search_documents(
+    fuzzy_filter: str,
+    path: str = ".",
+    file_types: str = "",
+    preview: bool = True,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Search documents using ripgrep-all with fuzzy filtering."""
+    if not fuzzy_filter:
+        return {"error": "'fuzzy_filter' argument is required"}
+
+    # Check if rga is available
+    if not RGA_EXECUTABLE:
+        return {"error": "ripgrep-all (rga) is not installed. Install it first."}
+
+    rga_bin = _require(RGA_EXECUTABLE, "rga")
+    fzf_bin = _require(FZF_EXECUTABLE, "fzf")
+
+    try:
+        # Build rga command - pass everything to match ripgrep's behavior
+        rga_cmd = [rga_bin, "--json", "--no-heading"]
+
+        # Add file type filters if specified
+        if file_types:
+            for ft in file_types.split(","):
+                rga_cmd.extend(["--rga-adapters", f"+{ft.strip()}"])
+
+        # Search pattern and path
+        search_path = str(Path(path).resolve())
+        rga_cmd.extend([".", search_path])  # "." searches all content
+
+        # Execute rga and collect output for fzf
+        rga_proc = subprocess.Popen(
+            rga_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+
+        # Collect all lines for fzf filtering
+        lines_for_fzf = []
+        json_lines = []  # Store original JSON for later parsing
+
+        for line in rga_proc.stdout:
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+                if data.get("type") == "match":
+                    match_data = data["data"]
+                    path_str = match_data["path"]["text"]
+                    lines_text = match_data["lines"]["text"].strip()
+
+                    # Extract page number from text if present
+                    page_match = re.match(r"Page (\d+):", lines_text)
+                    page_num = int(page_match.group(1)) if page_match else None
+
+                    # Format for fzf: path:content (similar to ripgrep output)
+                    fzf_line = f"{path_str}:{lines_text}"
+                    lines_for_fzf.append(fzf_line)
+                    json_lines.append((fzf_line, data))
+
+            except json.JSONDecodeError:
+                continue
+
+        rga_proc.wait()
+
+        if not lines_for_fzf:
+            return {"matches": []}
+
+        # Use fzf to filter results
+        fzf_input = "\n".join(lines_for_fzf)
+        fzf_proc = subprocess.Popen(
+            [fzf_bin, "--filter", fuzzy_filter],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+
+        fzf_output, _ = fzf_proc.communicate(fzf_input)
+
+        # Parse filtered results
+        matches = []
+        matched_lines = set(fzf_output.strip().splitlines())
+
+        for fzf_line, json_data in json_lines:
+            if fzf_line in matched_lines:
+                match_data = json_data["data"]
+                path_str = match_data["path"]["text"]
+                lines_text = match_data["lines"]["text"].strip()
+
+                # Extract page number if present
+                page_match = re.match(r"Page (\d+): (.+)", lines_text)
+                if page_match:
+                    page_num = int(page_match.group(1))
+                    content = page_match.group(2)
+                else:
+                    page_num = None
+                    content = lines_text
+
+                # Get matched text from submatches
+                match_texts = []
+                for submatch in match_data.get("submatches", []):
+                    match_texts.append(submatch["match"]["text"])
+
+                matches.append(
+                    {
+                        "file": _normalize_path(path_str),
+                        "page": page_num,
+                        "content": content,
+                        "match_text": " ".join(match_texts) if match_texts else "",
+                    }
+                )
+
+                if len(matches) >= limit:
+                    break
+
+        return {"matches": matches}
+
+    except subprocess.CalledProcessError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Tool: extract_pdf_pages
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    description=(
+        "Extract specific pages from a PDF and convert to various formats.\n\n"
+        "Uses pdf2txt.py to extract pages and pandoc for format conversion.\n\n"
+        "Args:\n"
+        "  file (str): Path to PDF file. Required.\n"
+        "  pages (str): Comma-separated page numbers (1-indexed). Required.\n"
+        "  format (str, optional): Output format (markdown,html,plain). Default: markdown.\n"
+        "  preserve_layout (bool, optional): Try to preserve layout. Default: false.\n\n"
+        "Examples:\n"
+        "  Extract page 5: pages='5'\n"
+        "  Extract pages 1,3,5: pages='1,3,5'\n"
+        "  Extract pages 2-10: pages='2,3,4,5,6,7,8,9,10'\n\n"
+        "Returns: { content: string, pages_extracted: number[], format: string } or { error: string }"
+    )
+)
+def extract_pdf_pages(
+    file: str,
+    pages: str,
+    format: str = "markdown",
+    preserve_layout: bool = False,
+) -> dict[str, Any]:
+    """Extract specific pages from PDF with format conversion."""
+    if not file or not pages:
+        return {"error": "Both 'file' and 'pages' arguments are required"}
+
+    # Check if required binaries are available
+    if not PDF2TXT_EXECUTABLE:
+        return {"error": "pdf2txt.py is not installed. Install pdfminer.six first."}
+    if not PANDOC_EXECUTABLE:
+        return {"error": "pandoc is not installed. Install it first."}
+
+    pdf2txt_bin = _require(PDF2TXT_EXECUTABLE, "pdf2txt.py")
+    pandoc_bin = _require(PANDOC_EXECUTABLE, "pandoc")
+
+    # Parse page numbers
+    try:
+        page_list = [int(p.strip()) for p in pages.split(",")]
+    except ValueError:
+        return {"error": "Invalid page numbers. Use comma-separated integers."}
+
+    # Check if file exists
+    pdf_path = Path(file)
+    if not pdf_path.exists():
+        return {"error": f"PDF file not found: {file}"}
+
+    try:
+        # Build pdf2txt command
+        pdf_cmd = [pdf2txt_bin, "-t", "html"]
+
+        # Add page numbers
+        pdf_cmd.extend(["--page-numbers"] + [str(p) for p in page_list])
+
+        # Add layout preservation if requested
+        if preserve_layout:
+            pdf_cmd.extend(["-Y", "exact"])
+
+        pdf_cmd.append(str(pdf_path.resolve()))
+
+        # Map format to pandoc format
+        pandoc_formats = {
+            "markdown": "gfm+tex_math_dollars",
+            "html": "html",
+            "plain": "plain",
+            "latex": "latex",
+            "docx": "docx",
+        }
+
+        pandoc_format = pandoc_formats.get(format, "gfm+tex_math_dollars")
+
+        # Build pandoc command
+        pandoc_cmd = [pandoc_bin, "--from=html", f"--to={pandoc_format}", "--wrap=none"]
+
+        # Execute pipeline
+        pdf_proc = subprocess.Popen(
+            pdf_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+
+        pandoc_proc = subprocess.Popen(
+            pandoc_cmd,
+            stdin=pdf_proc.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        pdf_proc.stdout.close()
+
+        content, pandoc_err = pandoc_proc.communicate()
+        pdf_proc.wait()
+
+        if pdf_proc.returncode != 0:
+            _, pdf_err = pdf_proc.communicate()
+            return {"error": f"pdf2txt failed: {pdf_err.decode()}"}
+
+        if pandoc_proc.returncode != 0:
+            return {"error": f"pandoc failed: {pandoc_err}"}
+
+        return {"content": content, "pages_extracted": page_list, "format": format}
+
+    except subprocess.CalledProcessError as exc:
+        return {"error": str(exc)}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
 # CLI helper
 # ---------------------------------------------------------------------------
 
@@ -863,6 +1119,22 @@ def _cli() -> None:
         help="Match only on content, ignore file paths",
     )
 
+    # search-documents subcommand
+    p_docs = sub.add_parser(
+        "search-documents", help="Search through PDFs and documents"
+    )
+    p_docs.add_argument("fuzzy_filter", help="fzf query for document search")
+    p_docs.add_argument("path", nargs="?", default=".", help="Directory/file to search")
+    p_docs.add_argument("--file-types", default="", help="Comma-separated file types")
+    p_docs.add_argument("--limit", type=int, default=20, help="Max results")
+
+    # extract-pdf subcommand
+    p_pdf = sub.add_parser("extract-pdf", help="Extract pages from PDF")
+    p_pdf.add_argument("file", help="PDF file path")
+    p_pdf.add_argument("pages", help="Comma-separated page numbers")
+    p_pdf.add_argument("--format", default="markdown", help="Output format")
+    p_pdf.add_argument("--preserve-layout", action="store_true", help="Preserve layout")
+
     ns = parser.parse_args()
 
     # Handle --examples flag
@@ -878,7 +1150,7 @@ def _cli() -> None:
         res = fuzzy_search_files(
             ns.fuzzy_filter, ns.path, ns.hidden, ns.limit, ns.multiline
         )
-    else:
+    elif ns.cmd == "search-content":
         res = fuzzy_search_content(
             ns.fuzzy_filter,
             ns.path,
@@ -888,6 +1160,14 @@ def _cli() -> None:
             ns.multiline,
             ns.content_only,
         )
+    elif ns.cmd == "search-documents":
+        res = fuzzy_search_documents(
+            ns.fuzzy_filter, ns.path, ns.file_types, True, ns.limit
+        )
+    elif ns.cmd == "extract-pdf":
+        res = extract_pdf_pages(ns.file, ns.pages, ns.format, ns.preserve_layout)
+    else:
+        parser.error(f"Unknown command: {ns.cmd}")
 
     print(json.dumps(res, indent=2))
 

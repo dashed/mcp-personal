@@ -442,13 +442,17 @@ async def test_list_tools():
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         result = await client.list_tools()
 
-        assert len(result.tools) == 2
+        assert len(result.tools) == 4
 
         # Find tools by name
         files_tool = next(t for t in result.tools if t.name == "fuzzy_search_files")
         content_tool = next(t for t in result.tools if t.name == "fuzzy_search_content")
+        documents_tool = next(
+            t for t in result.tools if t.name == "fuzzy_search_documents"
+        )
+        pdf_tool = next(t for t in result.tools if t.name == "extract_pdf_pages")
 
-        # Verify metadata
+        # Verify metadata for original tools
         assert files_tool.description and "fuzzy matching" in files_tool.description
         assert "fuzzy_filter" in files_tool.inputSchema["required"]
 
@@ -457,6 +461,14 @@ async def test_list_tools():
             and "Search file contents using fuzzy filtering" in content_tool.description
         )
         assert "fuzzy_filter" in content_tool.inputSchema["required"]
+
+        # Verify metadata for PDF tools
+        assert documents_tool.description and "PDFs" in documents_tool.description
+        assert "fuzzy_filter" in documents_tool.inputSchema["required"]
+
+        assert pdf_tool.description and "Extract specific pages" in pdf_tool.description
+        assert "file" in pdf_tool.inputSchema["required"]
+        assert "pages" in pdf_tool.inputSchema["required"]
 
 
 def test_cli_search_files(tmp_path: Path):
@@ -1004,3 +1016,248 @@ def test_fuzzy_search_content_windows_paths():
                         assert "class Application:" in match["content"]
                         # Ensure no backslashes in the path
                         assert "\\" not in match["file"]
+
+
+# ---------------------------------------------------------------------------
+# Tests for PDF tools
+# ---------------------------------------------------------------------------
+
+
+async def test_fuzzy_search_documents_missing_binary():
+    """Test fuzzy_search_documents handles missing rga binary gracefully."""
+    # Temporarily patch RGA_EXECUTABLE to None
+    original_rga = mcp_fuzzy_search.RGA_EXECUTABLE
+    try:
+        mcp_fuzzy_search.RGA_EXECUTABLE = None
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_documents", {"fuzzy_filter": "test", "path": "."}
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "error" in data
+            assert "ripgrep-all" in data["error"]
+            assert "not installed" in data["error"]
+    finally:
+        mcp_fuzzy_search.RGA_EXECUTABLE = original_rga
+
+
+async def test_fuzzy_search_documents_basic(tmp_path: Path):
+    """Test fuzzy_search_documents with mock rga output."""
+    _skip_if_missing("rga")
+    _skip_if_missing("fzf")
+
+    # Create a mock PDF file for testing
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf content")
+
+    # Mock the rga JSON output
+    mock_rga_output = (
+        '''{"type":"match","data":{"path":{"text":"'''
+        + str(test_pdf)
+        + '''"},"lines":{"text":"Page 1: This is test content\\n"},"line_number":null,"absolute_offset":100,"submatches":[{"match":{"text":"test"},"start":8,"end":12}]}}
+{"type":"end","data":{"path":{"text":"'''
+        + str(test_pdf)
+        + """"},"binary_offset":null,"stats":{"elapsed":{"secs":0,"nanos":35222125,"human":"0.035222s"},"searches":1,"searches_with_match":1,"bytes_searched":1000,"bytes_printed":100,"matched_lines":1,"matches":1}}}"""
+    )
+
+    with patch("subprocess.Popen") as mock_popen:
+        # Mock rga process
+        mock_rga_proc = MagicMock()
+        mock_rga_proc.stdout = mock_rga_output.splitlines()
+        mock_rga_proc.wait.return_value = None
+
+        # Mock fzf process
+        mock_fzf_proc = MagicMock()
+        mock_fzf_proc.communicate.return_value = (
+            f"{test_pdf}:Page 1: This is test content",
+            None,
+        )
+
+        # Configure mocks
+        mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_documents",
+                {"fuzzy_filter": "test", "path": str(tmp_path)},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "matches" in data
+            assert len(data["matches"]) == 1
+
+            match = data["matches"][0]
+            assert "file" in match
+            assert "page" in match
+            assert "content" in match
+            assert "match_text" in match
+
+            assert match["page"] == 1
+            assert "test content" in match["content"]
+            assert match["match_text"] == "test"
+
+
+async def test_fuzzy_search_documents_parse_rga_json():
+    """Test parsing of actual rga JSON output format."""
+    sample_json = """{"type":"match","data":{"path":{"text":"./Linear Algebra Done Right 4e.pdf"},"lines":{"text":"Page 402: of scalar and vector, 12\\n"},"line_number":null,"absolute_offset":1174364,"submatches":[{"match":{"text":"vector"},"start":24,"end":30}]}}"""
+
+    # Parse the JSON
+    data = json.loads(sample_json)
+    assert data["type"] == "match"
+    assert data["data"]["line_number"] is None  # PDFs don't have line numbers
+    assert "Page 402:" in data["data"]["lines"]["text"]
+
+    # Extract page number
+    import re
+
+    lines_text = data["data"]["lines"]["text"].strip()
+    page_match = re.match(r"Page (\d+):", lines_text)
+    assert page_match is not None
+    assert int(page_match.group(1)) == 402
+
+
+async def test_extract_pdf_pages_missing_binaries():
+    """Test extract_pdf_pages handles missing binaries gracefully."""
+    # Test missing pdf2txt.py
+    original_pdf2txt = mcp_fuzzy_search.PDF2TXT_EXECUTABLE
+    try:
+        mcp_fuzzy_search.PDF2TXT_EXECUTABLE = None
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages", {"file": "test.pdf", "pages": "1,2,3"}
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "error" in data
+            assert "pdf2txt.py" in data["error"]
+    finally:
+        mcp_fuzzy_search.PDF2TXT_EXECUTABLE = original_pdf2txt
+
+    # Test missing pandoc
+    original_pandoc = mcp_fuzzy_search.PANDOC_EXECUTABLE
+    try:
+        mcp_fuzzy_search.PANDOC_EXECUTABLE = None
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages", {"file": "test.pdf", "pages": "1,2,3"}
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "error" in data
+            assert "pandoc" in data["error"]
+    finally:
+        mcp_fuzzy_search.PANDOC_EXECUTABLE = original_pandoc
+
+
+async def test_extract_pdf_pages_invalid_input(tmp_path: Path):
+    """Test extract_pdf_pages handles invalid input gracefully."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        # Test missing file
+        result = await client.call_tool(
+            "extract_pdf_pages",
+            {"file": str(tmp_path / "nonexistent.pdf"), "pages": "1"},
+        )
+        data = json.loads(result.content[0].text)
+        assert "error" in data
+        assert "not found" in data["error"]
+
+        # Test invalid page numbers
+        test_pdf = tmp_path / "test.pdf"
+        test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+        result = await client.call_tool(
+            "extract_pdf_pages", {"file": str(test_pdf), "pages": "abc"}
+        )
+        data = json.loads(result.content[0].text)
+        assert "error" in data
+        assert "Invalid page numbers" in data["error"]
+
+
+async def test_extract_pdf_pages_basic(tmp_path: Path):
+    """Test extract_pdf_pages with mock subprocess."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    # Create a test PDF
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf content")
+
+    with patch("subprocess.Popen") as mock_popen:
+        # Mock pdf2txt process
+        mock_pdf_proc = MagicMock()
+        mock_pdf_proc.stdout = MagicMock()
+        mock_pdf_proc.wait.return_value = None
+        mock_pdf_proc.returncode = 0
+        mock_pdf_proc.communicate.return_value = (None, b"")
+
+        # Mock pandoc process
+        mock_pandoc_proc = MagicMock()
+        mock_pandoc_proc.communicate.return_value = (
+            "# Page 1\n\nExtracted content from page 1\n",
+            None,
+        )
+        mock_pandoc_proc.returncode = 0
+
+        # Configure mocks
+        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {"file": str(test_pdf), "pages": "1", "format": "markdown"},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "content" in data
+            assert "pages_extracted" in data
+            assert "format" in data
+
+            assert data["pages_extracted"] == [1]
+            assert data["format"] == "markdown"
+            assert "Extracted content" in data["content"]
+
+
+async def test_fuzzy_search_documents_with_file_types(tmp_path: Path):
+    """Test fuzzy_search_documents with file type filtering."""
+    _skip_if_missing("rga")
+    _skip_if_missing("fzf")
+
+    with patch("subprocess.Popen") as mock_popen:
+        # Mock processes
+        mock_rga_proc = MagicMock()
+        mock_rga_proc.stdout = []
+        mock_rga_proc.wait.return_value = None
+
+        mock_fzf_proc = MagicMock()
+        mock_fzf_proc.communicate.return_value = ("", None)
+
+        mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_documents",
+                {
+                    "fuzzy_filter": "test",
+                    "path": str(tmp_path),
+                    "file_types": "pdf,docx",
+                },
+            )
+
+            # Check that rga was called with the right adapter flags
+            rga_call = mock_popen.call_args_list[0]
+            args = rga_call[0][0]
+            assert "--rga-adapters" in args
+            assert "+pdf" in args
+            assert "+docx" in args
+
+            # Verify the result (should have empty matches since mocks return empty)
+            data = json.loads(result.content[0].text)
+            assert "matches" in data
+            assert data["matches"] == []
