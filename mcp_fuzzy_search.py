@@ -793,6 +793,9 @@ def fuzzy_search_documents(
         lines_for_fzf = []
         json_lines = []  # Store original JSON for later parsing
 
+        if rga_proc.stdout is None:
+            return {"error": "Failed to create subprocess stdout pipe"}
+
         for line in rga_proc.stdout:
             if not line.strip():
                 continue
@@ -927,17 +930,16 @@ def extract_pdf_pages(
         return {"error": f"PDF file not found: {file}"}
 
     try:
-        # Build pdf2txt command
-        pdf_cmd = [pdf2txt_bin, "-t", "html"]
+        # Build pdf2txt command - file path must come before options
+        pdf_cmd = [pdf2txt_bin, str(pdf_path.resolve()), "-t", "html"]
 
         # Add page numbers
-        pdf_cmd.extend(["--page-numbers"] + [str(p) for p in page_list])
+        pdf_cmd.append("--page-numbers")
+        pdf_cmd.extend([str(p) for p in page_list])
 
         # Add layout preservation if requested
         if preserve_layout:
             pdf_cmd.extend(["-Y", "exact"])
-
-        pdf_cmd.append(str(pdf_path.resolve()))
 
         # Map format to pandoc format
         pandoc_formats = {

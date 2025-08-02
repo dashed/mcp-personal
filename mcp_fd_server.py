@@ -355,7 +355,7 @@ def filter_files(
                             matches.append(chunk.decode("utf-8", errors="replace"))
 
         except subprocess.CalledProcessError as exc:
-            error_result = {"error": str(exc)}
+            error_result: dict[str, Any] = {"error": str(exc)}
             if warnings:
                 error_result["warnings"] = warnings
             return error_result
@@ -373,7 +373,7 @@ def filter_files(
             fd_proc.wait()
             matches = [_normalize_path(p) for p in out.splitlines() if p]
         except subprocess.CalledProcessError as exc:
-            error_result = {"error": str(exc)}
+            error_result: dict[str, Any] = {"error": str(exc)}
             if warnings:
                 error_result["warnings"] = warnings
             return error_result
