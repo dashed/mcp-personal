@@ -369,7 +369,8 @@ def filter_files(
         try:
             fd_proc = subprocess.Popen(fd_cmd, stdout=subprocess.PIPE)
             out = subprocess.check_output(fzf_cmd, stdin=fd_proc.stdout, text=True)
-            fd_proc.stdout.close()
+            if fd_proc.stdout:
+                fd_proc.stdout.close()
             fd_proc.wait()
             matches = [_normalize_path(p) for p in out.splitlines() if p]
         except subprocess.CalledProcessError as exc:

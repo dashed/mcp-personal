@@ -149,6 +149,7 @@ def test_mcp_server_mode():
             "id": 1,
         }
 
+        assert proc.stdin is not None
         proc.stdin.write(f"Content-Length: {len(json.dumps(init_request))}\r\n\r\n")
         proc.stdin.write(json.dumps(init_request))
         proc.stdin.flush()

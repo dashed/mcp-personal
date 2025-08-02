@@ -182,7 +182,7 @@ mcp = FastMCP("SQLite Database", lifespan=lifespan)
 )
 async def query(query: str, db_path: str | None = None) -> dict[str, Any]:
     """Execute a SELECT query and return results."""
-    context = mcp.context
+    context: SQLiteContext = mcp.context  # type: ignore[attr-defined]
 
     if not query.strip().upper().startswith("SELECT"):
         return {"error": "Only SELECT queries are allowed in query tool"}
@@ -228,7 +228,7 @@ async def query(query: str, db_path: str | None = None) -> dict[str, Any]:
 )
 async def execute(query: str, db_path: str | None = None) -> dict[str, Any]:
     """Execute INSERT, UPDATE, or DELETE queries."""
-    context = mcp.context
+    context: SQLiteContext = mcp.context  # type: ignore[attr-defined]
 
     if not context.allow_writes:
         return {
@@ -277,7 +277,7 @@ async def execute(query: str, db_path: str | None = None) -> dict[str, Any]:
 )
 async def list_tables(db_path: str | None = None) -> dict[str, Any]:
     """List all tables in the database."""
-    context = mcp.context
+    context: SQLiteContext = mcp.context  # type: ignore[attr-defined]
 
     try:
         conn = context.get_connection(db_path)
@@ -315,7 +315,7 @@ async def list_tables(db_path: str | None = None) -> dict[str, Any]:
 )
 async def describe_table(table_name: str, db_path: str | None = None) -> dict[str, Any]:
     """Get detailed information about a table's schema."""
-    context = mcp.context
+    context: SQLiteContext = mcp.context  # type: ignore[attr-defined]
 
     try:
         conn = context.get_connection(db_path)
@@ -405,7 +405,7 @@ async def create_table(
     db_path: str | None = None,
 ) -> dict[str, Any]:
     """Create a new table with specified columns."""
-    context = mcp.context
+    context: SQLiteContext = mcp.context  # type: ignore[attr-defined]
 
     if not context.allow_writes:
         return {

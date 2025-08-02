@@ -55,15 +55,9 @@ format: ## Format code with ruff
 	@echo "Formatting code..."
 	uv run ruff format $(SRC_FILES)
 
-type-check: ## Run type checking with pyright
+type-check: ## Run type checking with ty
 	@echo "Running type checks..."
-	@if command -v pyright > /dev/null 2>&1; then \
-		uv run pyright $(SRC_FILES); \
-	else \
-		echo "Installing pyright..."; \
-		uv add --dev pyright; \
-		uv run pyright $(SRC_FILES); \
-	fi
+	uv run ty check --exclude git-repos
 
 check: lint type-check test ## Run all checks (lint, type-check, test)
 
@@ -104,12 +98,8 @@ ci-local: ## Run all CI checks locally (format check, lint, type-check, tests)
 	@echo "✓ Linting passed"
 	@echo ""
 	@echo "3. Running type checks..."
-	@if command -v pyright > /dev/null 2>&1; then \
-		uv run pyright $(SRC_FILES) || (echo "❌ Type checking failed." && exit 1); \
-	else \
-		echo "⚠️  Pyright not installed, skipping type checks"; \
-	fi
-	@echo "✓ Type checking passed (or skipped)"
+	@uv run ty check --exclude git-repos || (echo "❌ Type checking failed." && exit 1)
+	@echo "✓ Type checking passed"
 	@echo ""
 	@echo "4. Checking dependencies..."
 	@which fd > /dev/null 2>&1 || which fdfind > /dev/null 2>&1 || echo "⚠️  Warning: fd not found - some tests may be skipped"
