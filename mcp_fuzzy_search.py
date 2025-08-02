@@ -5,6 +5,7 @@
 #
 # [project.optional-dependencies]
 # dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
+# pdf = ["pdfminer.six>=20221105"]
 # ///
 """
 `mcp_fuzzy_search.py` – **Model Context Protocol** server for fuzzy searching
@@ -67,6 +68,9 @@ Quick start
 brew install ripgrep fzf        # macOS
 # or apt install ripgrep fzf    # Debian/Ubuntu
 
+# Optional: Install pdfminer.six for page label support in extract-pdf
+uv pip install "pdfminer.six>=20221105"  # or pip install
+
 chmod +x mcp_fuzzy_search.py
 
 # 1. CLI usage
@@ -95,6 +99,16 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+
+# PDF processing imports (optional - only used for page label support)
+try:
+    from pdfminer.pdfdocument import PDFDocument
+    from pdfminer.pdfpage import PDFPage
+    from pdfminer.pdfparser import PDFParser
+
+    PDFMINER_AVAILABLE = True
+except ImportError:
+    PDFMINER_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -879,6 +893,93 @@ def fuzzy_search_documents(
 
 
 # ---------------------------------------------------------------------------
+# Helper: Build page label to index mapping
+# ---------------------------------------------------------------------------
+
+
+def _build_page_label_mapping(pdf_path: Path) -> dict[str, int]:
+    """Build a mapping from page labels to 0-based page indices.
+
+    Args:
+        pdf_path: Path to the PDF file
+
+    Returns:
+        Dictionary mapping page labels (e.g., "v", "vii", "1") to 0-based indices
+    """
+    if not PDFMINER_AVAILABLE:
+        return {}
+
+    label_to_index = {}
+
+    try:
+        with open(pdf_path, "rb") as fp:
+            parser = PDFParser(fp)
+            document = PDFDocument(parser)
+
+            for page_idx, page in enumerate(PDFPage.create_pages(document)):
+                if page.label:
+                    label_to_index[page.label] = page_idx
+
+    except Exception as e:
+        logger.debug(f"Could not extract page labels: {e}")
+
+    return label_to_index
+
+
+def _parse_page_spec(page_spec: str, label_mapping: dict[str, int]) -> list[int]:
+    """Parse a page specification into 0-based page indices.
+
+    Handles:
+    - Single labels: "v", "ToC", "1"
+    - Ranges: "v-vii", "1-5"
+    - Numeric fallback: If not found as label, treat as 0-based index
+
+    Args:
+        page_spec: Page specification string
+        label_mapping: Mapping from labels to 0-based indices
+
+    Returns:
+        List of 0-based page indices
+    """
+    indices = []
+
+    # Handle range (e.g., "v-vii")
+    if "-" in page_spec and page_spec.count("-") == 1:
+        start_spec, end_spec = page_spec.split("-", 1)
+        start_spec = start_spec.strip()
+        end_spec = end_spec.strip()
+
+        # Try to resolve as labels first
+        start_idx = label_mapping.get(start_spec)
+        end_idx = label_mapping.get(end_spec)
+
+        # Fallback to numeric if not found as labels
+        if start_idx is None and start_spec.isdigit():
+            start_idx = int(start_spec)
+        if end_idx is None and end_spec.isdigit():
+            end_idx = int(end_spec)
+
+        if start_idx is not None and end_idx is not None:
+            # Include both start and end in range
+            indices.extend(range(start_idx, end_idx + 1))
+    else:
+        # Single page
+        page_spec = page_spec.strip()
+
+        # Try as label first
+        idx = label_mapping.get(page_spec)
+
+        # Fallback to numeric if not found as label
+        if idx is None and page_spec.isdigit():
+            idx = int(page_spec)
+
+        if idx is not None:
+            indices.append(idx)
+
+    return indices
+
+
+# ---------------------------------------------------------------------------
 # Tool: extract_pdf_pages
 # ---------------------------------------------------------------------------
 
@@ -889,14 +990,20 @@ def fuzzy_search_documents(
         "Uses pdf2txt.py to extract pages and pandoc for format conversion.\n\n"
         "Args:\n"
         "  file (str): Path to PDF file. Required.\n"
-        "  pages (str): Comma-separated page numbers (1-indexed). Required.\n"
+        "  pages (str): Comma-separated page specifications. Required.\n"
         "  format (str, optional): Output format (markdown,html,plain). Default: markdown.\n"
         "  preserve_layout (bool, optional): Try to preserve layout. Default: false.\n\n"
+        "Page specifications:\n"
+        "  - Page labels: 'v', 'vii', 'ToC', 'Introduction' (as shown in PDF readers)\n"
+        "  - Ranges: 'v-vii', '1-5'\n"
+        "  - Numeric: '0', '14' (treated as label first, then 0-based index if not found)\n"
+        "  - Mixed: 'v,vii,1,5-8,ToC'\n\n"
         "Examples:\n"
-        "  Extract page 5: pages='5'\n"
-        "  Extract pages 1,3,5: pages='1,3,5'\n"
-        "  Extract pages 2-10: pages='2,3,4,5,6,7,8,9,10'\n\n"
-        "Returns: { content: string, pages_extracted: number[], format: string } or { error: string }"
+        "  Extract roman numeral pages: pages='v,vi,vii'\n"
+        "  Extract range: pages='v-vii'\n"
+        "  Extract by 0-based index: pages='14' (if '14' is not a page label)\n"
+        "  Extract mixed: pages='ToC,v-vii,1,2'\n\n"
+        "Returns: { content: string, pages_extracted: number[], page_labels: string[], format: string } or { error: string }"
     )
 )
 def extract_pdf_pages(
@@ -918,16 +1025,53 @@ def extract_pdf_pages(
     pdf2txt_bin = _require(PDF2TXT_EXECUTABLE, "pdf2txt.py")
     pandoc_bin = _require(PANDOC_EXECUTABLE, "pandoc")
 
-    # Parse page numbers
-    try:
-        page_list = [int(p.strip()) for p in pages.split(",")]
-    except ValueError:
-        return {"error": "Invalid page numbers. Use comma-separated integers."}
-
     # Check if file exists
     pdf_path = Path(file)
     if not pdf_path.exists():
         return {"error": f"PDF file not found: {file}"}
+
+    # Build page label mapping
+    label_mapping = _build_page_label_mapping(pdf_path)
+
+    # Parse page specifications
+    page_indices = []
+    page_labels_used = []
+
+    for page_spec in pages.split(","):
+        page_spec = page_spec.strip()
+        if not page_spec:
+            continue
+
+        spec_indices = _parse_page_spec(page_spec, label_mapping)
+        if not spec_indices:
+            return {
+                "error": f"Invalid page specification: '{page_spec}'. Not found as page label or valid index."
+            }
+
+        page_indices.extend(spec_indices)
+
+        # Track which labels were used for response
+        if page_spec in label_mapping:
+            page_labels_used.append(page_spec)
+        elif "-" in page_spec:
+            # For ranges, track if they were label-based
+            parts = page_spec.split("-", 1)
+            if parts[0].strip() in label_mapping or parts[1].strip() in label_mapping:
+                page_labels_used.append(page_spec)
+
+    if not page_indices:
+        return {"error": "No valid pages specified."}
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_indices = []
+    for idx in page_indices:
+        if idx not in seen:
+            seen.add(idx)
+            unique_indices.append(idx)
+
+    # Convert to 1-based for pdf2txt.py
+    page_list = [idx + 1 for idx in unique_indices]
 
     try:
         # Build pdf2txt command - file path must come before options
@@ -980,7 +1124,12 @@ def extract_pdf_pages(
         if pandoc_proc.returncode != 0:
             return {"error": f"pandoc failed: {pandoc_err}"}
 
-        return {"content": content, "pages_extracted": page_list, "format": format}
+        return {
+            "content": content,
+            "pages_extracted": unique_indices,  # Return 0-based indices
+            "page_labels": page_labels_used,
+            "format": format,
+        }
 
     except subprocess.CalledProcessError as exc:
         return {"error": str(exc)}
@@ -1133,8 +1282,12 @@ def _cli() -> None:
     # extract-pdf subcommand
     p_pdf = sub.add_parser("extract-pdf", help="Extract pages from PDF")
     p_pdf.add_argument("file", help="PDF file path")
-    p_pdf.add_argument("pages", help="Comma-separated page numbers")
-    p_pdf.add_argument("--format", default="markdown", help="Output format")
+    p_pdf.add_argument(
+        "pages", help="Page specs: labels (v,ToC), ranges (v-vii), or 0-based indices"
+    )
+    p_pdf.add_argument(
+        "--format", default="markdown", help="Output format (markdown/html/plain)"
+    )
     p_pdf.add_argument("--preserve-layout", action="store_true", help="Preserve layout")
 
     ns = parser.parse_args()

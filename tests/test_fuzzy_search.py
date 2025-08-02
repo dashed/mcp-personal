@@ -1177,7 +1177,7 @@ async def test_extract_pdf_pages_invalid_input(tmp_path: Path):
         )
         data = json.loads(result.content[0].text)
         assert "error" in data
-        assert "Invalid page numbers" in data["error"]
+        assert "Invalid page specification" in data["error"]
 
 
 async def test_extract_pdf_pages_basic(tmp_path: Path):
@@ -1261,3 +1261,267 @@ async def test_fuzzy_search_documents_with_file_types(tmp_path: Path):
             data = json.loads(result.content[0].text)
             assert "matches" in data
             assert data["matches"] == []
+
+
+# ---------------------------------------------------------------------------
+# PDF Page Label Tests
+# ---------------------------------------------------------------------------
+
+
+def test_build_page_label_mapping_no_pdfminer():
+    """Test _build_page_label_mapping when pdfminer is not available."""
+    original_available = mcp_fuzzy_search.PDFMINER_AVAILABLE
+    try:
+        mcp_fuzzy_search.PDFMINER_AVAILABLE = False
+        mapping = mcp_fuzzy_search._build_page_label_mapping(Path("test.pdf"))
+        assert mapping == {}
+    finally:
+        mcp_fuzzy_search.PDFMINER_AVAILABLE = original_available
+
+
+@patch("mcp_fuzzy_search.PDFMINER_AVAILABLE", True)
+def test_build_page_label_mapping_with_labels(tmp_path: Path):
+    """Test _build_page_label_mapping with mocked PDF that has page labels."""
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    # Mock PDF components
+    with (
+        patch("mcp_fuzzy_search.PDFParser"),
+        patch("mcp_fuzzy_search.PDFDocument"),
+        patch("mcp_fuzzy_search.PDFPage") as mock_page_class,
+    ):
+        # Mock page objects with labels
+        mock_page1 = MagicMock()
+        mock_page1.label = "iii"
+        mock_page2 = MagicMock()
+        mock_page2.label = "iv"
+        mock_page3 = MagicMock()
+        mock_page3.label = "1"
+        mock_page4 = MagicMock()
+        mock_page4.label = None  # No label
+
+        mock_page_class.create_pages.return_value = [
+            mock_page1,
+            mock_page2,
+            mock_page3,
+            mock_page4,
+        ]
+
+        mapping = mcp_fuzzy_search._build_page_label_mapping(test_pdf)
+
+        expected = {
+            "iii": 0,
+            "iv": 1,
+            "1": 2,
+            # Page 4 has no label, so not in mapping
+        }
+        assert mapping == expected
+
+
+@patch("mcp_fuzzy_search.PDFMINER_AVAILABLE", True)
+def test_build_page_label_mapping_parse_error(tmp_path: Path):
+    """Test _build_page_label_mapping when PDF parsing fails."""
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    with patch("mcp_fuzzy_search.PDFParser") as mock_parser:
+        mock_parser.side_effect = Exception("PDF parsing failed")
+
+        mapping = mcp_fuzzy_search._build_page_label_mapping(test_pdf)
+        assert mapping == {}
+
+
+def test_parse_page_spec_single_label():
+    """Test _parse_page_spec with single page labels."""
+    label_mapping = {"iii": 0, "iv": 1, "v": 2, "1": 3, "2": 4}
+
+    # Test single labels
+    assert mcp_fuzzy_search._parse_page_spec("iii", label_mapping) == [0]
+    assert mcp_fuzzy_search._parse_page_spec("v", label_mapping) == [2]
+    assert mcp_fuzzy_search._parse_page_spec("1", label_mapping) == [3]
+
+
+def test_parse_page_spec_numeric_fallback():
+    """Test _parse_page_spec falls back to numeric when label not found."""
+    label_mapping = {"iii": 0, "iv": 1}
+
+    # Numeric fallback
+    assert mcp_fuzzy_search._parse_page_spec("5", label_mapping) == [5]
+    assert mcp_fuzzy_search._parse_page_spec("10", label_mapping) == [10]
+
+
+def test_parse_page_spec_ranges():
+    """Test _parse_page_spec with ranges."""
+    label_mapping = {"iii": 0, "iv": 1, "v": 2, "vi": 3, "vii": 4, "1": 5}
+
+    # Label-based ranges
+    assert mcp_fuzzy_search._parse_page_spec("iii-v", label_mapping) == [0, 1, 2]
+    assert mcp_fuzzy_search._parse_page_spec("v-vii", label_mapping) == [2, 3, 4]
+
+    # Numeric ranges
+    assert mcp_fuzzy_search._parse_page_spec("7-9", label_mapping) == [7, 8, 9]
+
+    # Mixed ranges (one label, one numeric)
+    assert mcp_fuzzy_search._parse_page_spec("v-7", label_mapping) == [2, 3, 4, 5, 6, 7]
+
+
+def test_parse_page_spec_invalid():
+    """Test _parse_page_spec with invalid specifications."""
+    label_mapping = {"iii": 0, "iv": 1}
+
+    # Invalid specifications should return empty list
+    assert mcp_fuzzy_search._parse_page_spec("nonexistent", label_mapping) == []
+    assert mcp_fuzzy_search._parse_page_spec("", label_mapping) == []
+    assert mcp_fuzzy_search._parse_page_spec("abc", label_mapping) == []
+
+
+def test_parse_page_spec_edge_cases():
+    """Test _parse_page_spec edge cases."""
+    label_mapping = {"iii": 0, "iv": 1, "v": 2}
+
+    # Range with only one side valid
+    assert mcp_fuzzy_search._parse_page_spec("iii-nonexistent", label_mapping) == []
+    assert mcp_fuzzy_search._parse_page_spec("nonexistent-v", label_mapping) == []
+
+    # Multiple dashes (should not be treated as range)
+    assert mcp_fuzzy_search._parse_page_spec("a-b-c", label_mapping) == []
+
+
+async def test_extract_pdf_pages_with_labels(tmp_path: Path):
+    """Test extract_pdf_pages with page labels."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    with (
+        patch("mcp_fuzzy_search._build_page_label_mapping") as mock_mapping,
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        # Mock page label mapping
+        mock_mapping.return_value = {"iii": 0, "iv": 1, "v": 2, "1": 3}
+
+        # Mock subprocess calls
+        mock_pdf_proc = MagicMock()
+        mock_pdf_proc.stdout = MagicMock()
+        mock_pdf_proc.wait.return_value = None
+        mock_pdf_proc.returncode = 0
+        mock_pdf_proc.communicate.return_value = (None, b"")
+
+        mock_pandoc_proc = MagicMock()
+        mock_pandoc_proc.communicate.return_value = (
+            "# Roman Numeral Pages\n\nContent from pages iii and iv\n",
+            None,
+        )
+        mock_pandoc_proc.returncode = 0
+
+        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {"file": str(test_pdf), "pages": "iii,iv", "format": "markdown"},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "content" in data
+            assert "pages_extracted" in data
+            assert "page_labels" in data
+            assert "format" in data
+
+            # Should extract pages 0 and 1 (0-based indices for labels iii and iv)
+            assert data["pages_extracted"] == [0, 1]
+            assert data["page_labels"] == ["iii", "iv"]
+            assert data["format"] == "markdown"
+            assert "Roman Numeral Pages" in data["content"]
+
+
+async def test_extract_pdf_pages_with_ranges(tmp_path: Path):
+    """Test extract_pdf_pages with page label ranges."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    with (
+        patch("mcp_fuzzy_search._build_page_label_mapping") as mock_mapping,
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        mock_mapping.return_value = {"iii": 0, "iv": 1, "v": 2, "vi": 3}
+
+        # Mock subprocess calls
+        mock_pdf_proc = MagicMock()
+        mock_pdf_proc.stdout = MagicMock()
+        mock_pdf_proc.wait.return_value = None
+        mock_pdf_proc.returncode = 0
+        mock_pdf_proc.communicate.return_value = (None, b"")
+
+        mock_pandoc_proc = MagicMock()
+        mock_pandoc_proc.communicate.return_value = (
+            "# Range Content\n\nPages iii through v\n",
+            None,
+        )
+        mock_pandoc_proc.returncode = 0
+
+        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {"file": str(test_pdf), "pages": "iii-v", "format": "markdown"},
+            )
+
+            data = json.loads(result.content[0].text)
+
+            # Should extract pages 0, 1, 2 (0-based indices for labels iii, iv, v)
+            assert data["pages_extracted"] == [0, 1, 2]
+            assert data["page_labels"] == ["iii-v"]
+            assert "Range Content" in data["content"]
+
+
+async def test_extract_pdf_pages_mixed_specs(tmp_path: Path):
+    """Test extract_pdf_pages with mixed page specifications."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    with (
+        patch("mcp_fuzzy_search._build_page_label_mapping") as mock_mapping,
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        # Only some pages have labels
+        mock_mapping.return_value = {"iii": 0, "iv": 1}
+
+        # Mock subprocess calls
+        mock_pdf_proc = MagicMock()
+        mock_pdf_proc.stdout = MagicMock()
+        mock_pdf_proc.wait.return_value = None
+        mock_pdf_proc.returncode = 0
+        mock_pdf_proc.communicate.return_value = (None, b"")
+
+        mock_pandoc_proc = MagicMock()
+        mock_pandoc_proc.communicate.return_value = (
+            "# Mixed Content\n\nMixed page specifications\n",
+            None,
+        )
+        mock_pandoc_proc.returncode = 0
+
+        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            # Mix of labels and numeric indices
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {"file": str(test_pdf), "pages": "iii,5,iv", "format": "markdown"},
+            )
+
+            data = json.loads(result.content[0].text)
+
+            # Should extract pages 0 (iii), 5 (numeric), 1 (iv) -> order preserved: [0, 5, 1]
+            assert data["pages_extracted"] == [0, 5, 1]
+            assert data["page_labels"] == ["iii", "iv"]  # Only the label-based ones
