@@ -88,16 +88,12 @@ Varol Aksoy (@vaksoy)
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
-import os
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +101,7 @@ from mcp.server.fastmcp import FastMCP
 
 try:
     import fitz  # PyMuPDF
+
     PYMUPDF_AVAILABLE = True
 except ImportError:
     PYMUPDF_AVAILABLE = False
@@ -146,41 +143,33 @@ def _require(exe: str | None, name: str) -> str:
 
 def _get_page_label(doc, page_idx: int) -> str:
     """Get the label for a specific page index.
-    
+
     Args:
         doc: PyMuPDF document object
         page_idx: 0-based page index
-    
+
     Returns:
         Page label string, or str(page_idx + 1) if no label
     """
     try:
         # Use PyMuPDF's page.get_label() method
         page = doc[page_idx]
-        if hasattr(page, 'get_label'):
+        if hasattr(page, "get_label"):
             label = page.get_label()
             if label:
                 return label
-    except:
+    except Exception:
         pass
-    
+
     # Default to 1-based physical page number
     return str(page_idx + 1)
 
 
 def _int_to_roman(num: int) -> str:
     """Convert integer to Roman numerals."""
-    val = [
-        1000, 900, 500, 400,
-        100, 90, 50, 40,
-        10, 9, 5, 4, 1
-    ]
-    syms = [
-        'M', 'CM', 'D', 'CD',
-        'C', 'XC', 'L', 'XL',
-        'X', 'IX', 'V', 'IV', 'I'
-    ]
-    roman_num = ''
+    val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+    syms = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
+    roman_num = ""
     i = 0
     while num > 0:
         for _ in range(num // val[i]):
@@ -192,26 +181,26 @@ def _int_to_roman(num: int) -> str:
 
 def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
     """Parse a page specification into 0-based page indices using PyMuPDF.
-    
+
     Handles:
     - Single labels: "v", "ToC", "14"
     - Ranges: "v-vii", "1-5"
-    
+
     Args:
         page_spec: Page specification string
         doc: PyMuPDF document object
-    
+
     Returns:
         List of 0-based page indices
     """
     indices = []
-    
+
     # Handle range
     if "-" in page_spec:
         parts = page_spec.split("-", 1)
         start_spec = parts[0].strip()
         end_spec = parts[1].strip()
-        
+
         # Resolve start using PyMuPDF's get_page_numbers
         start_indices = doc.get_page_numbers(start_spec)
         if not start_indices:
@@ -222,10 +211,10 @@ def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
                     start_indices = [page_num - 1]
             except ValueError:
                 pass
-        
+
         if not start_indices:
             return []  # Invalid start
-        
+
         # Resolve end
         end_indices = doc.get_page_numbers(end_spec)
         if not end_indices:
@@ -236,10 +225,10 @@ def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
                     end_indices = [page_num - 1]
             except ValueError:
                 pass
-        
+
         if not end_indices:
             return []  # Invalid end
-        
+
         # Generate range (inclusive) from first start to first end
         start_idx = start_indices[0]
         end_idx = end_indices[0]
@@ -247,7 +236,7 @@ def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
     else:
         # Single page - try PyMuPDF's get_page_numbers first
         all_indices = doc.get_page_numbers(page_spec)
-        
+
         if all_indices:
             # Take only the first match (like PDF readers do)
             indices = [all_indices[0]]
@@ -259,7 +248,7 @@ def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
                     indices = [page_num - 1]
             except ValueError:
                 pass
-    
+
     return indices
 
 
@@ -299,38 +288,40 @@ def extract_pdf_pages(
     """Extract specific pages from PDF using PyMuPDF."""
     if not file or not pages:
         return {"error": "Both 'file' and 'pages' arguments are required"}
-    
+
     # Check if PyMuPDF is available
     if not PYMUPDF_AVAILABLE:
-        return {"error": "PyMuPDF is not installed. Install it with: pip install PyMuPDF"}
-    
+        return {
+            "error": "PyMuPDF is not installed. Install it with: pip install PyMuPDF"
+        }
+
     # Check if file exists
     pdf_path = Path(file)
     if not pdf_path.exists():
         return {"error": f"PDF file not found: {file}"}
-    
+
     try:
         # Open PDF with PyMuPDF
         doc = fitz.open(pdf_path)
-        
+
         # Parse page specifications
         page_indices = []
         page_labels_used = []
-        
+
         for page_spec in pages.split(","):
             page_spec = page_spec.strip()
             if not page_spec:
                 continue
-            
+
             spec_indices = _parse_page_spec_pymupdf(page_spec, doc)
             if not spec_indices:
                 doc.close()
                 return {
                     "error": f"Invalid page specification: '{page_spec}'. Not found as page label or valid page number."
                 }
-            
+
             page_indices.extend(spec_indices)
-            
+
             # Track which labels were used
             # Check if this spec matched a label (not just a physical page number)
             if doc.get_page_numbers(page_spec):
@@ -338,13 +329,15 @@ def extract_pdf_pages(
             elif "-" in page_spec:
                 # For ranges, track if they were label-based
                 parts = page_spec.split("-", 1)
-                if doc.get_page_numbers(parts[0].strip()) or doc.get_page_numbers(parts[1].strip()):
+                if doc.get_page_numbers(parts[0].strip()) or doc.get_page_numbers(
+                    parts[1].strip()
+                ):
                     page_labels_used.append(page_spec)
-        
+
         if not page_indices:
             doc.close()
             return {"error": "No valid pages specified."}
-        
+
         # Remove duplicates while preserving order
         seen = set()
         unique_indices = []
@@ -352,10 +345,10 @@ def extract_pdf_pages(
             if idx not in seen:
                 seen.add(idx)
                 unique_indices.append(idx)
-        
+
         # Extract content based on format
         content_parts = []
-        
+
         # Determine extraction format
         if format == "html" or (format == "markdown" and PANDOC_EXECUTABLE):
             # Extract as HTML for pandoc conversion
@@ -363,50 +356,52 @@ def extract_pdf_pages(
         else:
             # Extract as plain text
             extract_format = "text"
-        
+
         # Extract pages
         for idx in unique_indices:
             page = doc[idx]
-            
+
             # Get page label for context
             labels = doc.get_page_labels()
             page_label = labels[idx] if labels and idx < len(labels) else str(idx + 1)
-            
+
             # Extract content
             if extract_format == "html":
                 page_content = page.get_text("html")
                 # Clean HTML if requested
                 if clean_html:
                     # Remove style attributes
-                    page_content = re.sub(r'\sstyle="[^"]*"', '', page_content)
+                    page_content = re.sub(r'\sstyle="[^"]*"', "", page_content)
                     # Remove font tags
-                    page_content = re.sub(r'</?font[^>]*>', '', page_content)
+                    page_content = re.sub(r"</?font[^>]*>", "", page_content)
                     # Remove span tags but keep content
-                    page_content = re.sub(r'<span[^>]*>', '', page_content)
-                    page_content = re.sub(r'</span>', '', page_content)
-                
+                    page_content = re.sub(r"<span[^>]*>", "", page_content)
+                    page_content = re.sub(r"</span>", "", page_content)
+
                 # Add page marker
-                content_parts.append(f'<div class="page" data-page="{idx + 1}" data-label="{page_label}">')
+                content_parts.append(
+                    f'<div class="page" data-page="{idx + 1}" data-label="{page_label}">'
+                )
                 content_parts.append(page_content)
-                content_parts.append('</div>')
+                content_parts.append("</div>")
             else:
                 # Plain text extraction
                 page_content = page.get_text("text")
                 # Add page marker
                 content_parts.append(f"\n[Page {idx + 1}] (Label: {page_label})\n")
                 content_parts.append(page_content)
-        
+
         # Join content
         if extract_format == "html":
             full_content = "<html><body>" + "".join(content_parts) + "</body></html>"
         else:
             full_content = "\n".join(content_parts)
-        
+
         # Convert format if needed
         if format == "markdown" and extract_format == "html" and PANDOC_EXECUTABLE:
             # Use pandoc to convert HTML to markdown
             pandoc_bin = _require(PANDOC_EXECUTABLE, "pandoc")
-            
+
             # Build pandoc command
             if clean_html:
                 from_format = "html-native_divs-native_spans"
@@ -414,17 +409,17 @@ def extract_pdf_pages(
             else:
                 from_format = "html"
                 to_format = "gfm+tex_math_dollars"
-            
+
             pandoc_cmd = [
                 pandoc_bin,
                 f"--from={from_format}",
                 f"--to={to_format}",
                 "--wrap=none",
             ]
-            
+
             if clean_html:
                 pandoc_cmd.append("--strip-comments")
-            
+
             # Run pandoc
             try:
                 pandoc_proc = subprocess.run(
@@ -434,10 +429,12 @@ def extract_pdf_pages(
                     check=False,
                     timeout=30,
                 )
-                
+
                 if pandoc_proc.returncode != 0:
-                    return {"error": f"pandoc conversion failed: {pandoc_proc.stderr.decode()}"}
-                
+                    return {
+                        "error": f"pandoc conversion failed: {pandoc_proc.stderr.decode()}"
+                    }
+
                 content = pandoc_proc.stdout.decode()
             except subprocess.TimeoutExpired:
                 return {"error": "pandoc conversion timed out"}
@@ -445,25 +442,25 @@ def extract_pdf_pages(
                 return {"error": f"pandoc conversion error: {e}"}
         else:
             content = full_content
-        
+
         # Build response
         # Get actual page labels for extracted pages
         extracted_labels = []
         for idx in unique_indices:
             page = doc[idx]
-            label = page.get_label() if hasattr(page, 'get_label') else str(idx + 1)
+            label = page.get_label() if hasattr(page, "get_label") else str(idx + 1)
             extracted_labels.append(label)
-        
+
         # Close the document
         doc.close()
-        
+
         return {
             "content": content,
             "pages_extracted": unique_indices,
             "page_labels": extracted_labels,
             "format": format,
         }
-        
+
     except Exception as e:
         return {"error": f"Failed to extract pages: {str(e)}"}
 
@@ -945,23 +942,28 @@ def fuzzy_search_documents(
                 if data.get("type") == "match":
                     match_data = data.get("data", {})
                     file_path = match_data.get("path", {}).get("text", "")
-                    line_num = match_data.get("line_number", 0)
-                    
+                    line_num = match_data.get("line_number") or 0
+
                     # Extract text from lines
                     lines = match_data.get("lines", {})
                     text = lines.get("text", "")
-                    
+
+                    # Extract matched text from submatches
+                    submatches = match_data.get("submatches", [])
+                    match_text = submatches[0]["match"]["text"] if submatches else text
+
                     # Build formatted line for fzf
                     formatted = f"{file_path}:{line_num}:{text}"
                     formatted_lines.append(formatted)
-                    
+
                     # Store mapping for later reconstruction
                     line_to_data[formatted] = {
                         "file": file_path,
                         "line": line_num,
                         "content": text,
-                        "match_text": text,
-                        "page": line_num,  # For PDFs, line number often represents page
+                        "match_text": match_text,
+                        "page": (line_num or 0)
+                        + 1,  # For PDFs, convert to 1-based page number
                     }
             except json.JSONDecodeError:
                 continue
@@ -1139,9 +1141,7 @@ def _cli() -> None:
         choices=["markdown", "html", "plain"],
         help="Output format",
     )
-    p_pdf.add_argument(
-        "--preserve-layout", action="store_true", help="Preserve layout"
-    )
+    p_pdf.add_argument("--preserve-layout", action="store_true", help="Preserve layout")
     p_pdf.add_argument(
         "--no-clean-html",
         dest="clean_html",
