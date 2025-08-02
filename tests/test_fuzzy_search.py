@@ -1189,24 +1189,23 @@ async def test_extract_pdf_pages_basic(tmp_path: Path):
     test_pdf = tmp_path / "test.pdf"
     test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf content")
 
-    with patch("subprocess.Popen") as mock_popen:
-        # Mock pdf2txt process
-        mock_pdf_proc = MagicMock()
-        mock_pdf_proc.stdout = MagicMock()
-        mock_pdf_proc.wait.return_value = None
-        mock_pdf_proc.returncode = 0
-        mock_pdf_proc.communicate.return_value = (None, b"")
+    with patch("subprocess.run") as mock_run:
+        # Mock pdf2txt process result
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = b"<p>Extracted HTML content from page 1</p>"
+        mock_pdf_result.stderr = b""
 
-        # Mock pandoc process
-        mock_pandoc_proc = MagicMock()
-        mock_pandoc_proc.communicate.return_value = (
-            "# Page 1\n\nExtracted content from page 1\n",
-            None,
+        # Mock pandoc process result
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = (
+            b"# Page 1\n\nExtracted content from page 1\n"
         )
-        mock_pandoc_proc.returncode = 0
+        mock_pandoc_result.stderr = b""
 
         # Configure mocks
-        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
 
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
             result = await client.call_tool(
@@ -1219,7 +1218,7 @@ async def test_extract_pdf_pages_basic(tmp_path: Path):
             assert "pages_extracted" in data
             assert "format" in data
 
-            assert data["pages_extracted"] == [1]
+            assert data["pages_extracted"] == [0]  # 0-based index for page 1
             assert data["format"] == "markdown"
             assert "Extracted content" in data["content"]
 
@@ -1346,9 +1345,9 @@ def test_parse_page_spec_numeric_fallback():
     """Test _parse_page_spec falls back to numeric when label not found."""
     label_mapping = {"iii": 0, "iv": 1}
 
-    # Numeric fallback
-    assert mcp_fuzzy_search._parse_page_spec("5", label_mapping) == [5]
-    assert mcp_fuzzy_search._parse_page_spec("10", label_mapping) == [10]
+    # Numeric fallback (1-based page numbers converted to 0-based indices)
+    assert mcp_fuzzy_search._parse_page_spec("5", label_mapping) == [4]
+    assert mcp_fuzzy_search._parse_page_spec("10", label_mapping) == [9]
 
 
 def test_parse_page_spec_ranges():
@@ -1359,11 +1358,11 @@ def test_parse_page_spec_ranges():
     assert mcp_fuzzy_search._parse_page_spec("iii-v", label_mapping) == [0, 1, 2]
     assert mcp_fuzzy_search._parse_page_spec("v-vii", label_mapping) == [2, 3, 4]
 
-    # Numeric ranges
-    assert mcp_fuzzy_search._parse_page_spec("7-9", label_mapping) == [7, 8, 9]
+    # Numeric ranges (1-based converted to 0-based)
+    assert mcp_fuzzy_search._parse_page_spec("7-9", label_mapping) == [6, 7, 8]
 
     # Mixed ranges (one label, one numeric)
-    assert mcp_fuzzy_search._parse_page_spec("v-7", label_mapping) == [2, 3, 4, 5, 6, 7]
+    assert mcp_fuzzy_search._parse_page_spec("v-7", label_mapping) == [2, 3, 4, 5, 6]
 
 
 def test_parse_page_spec_invalid():
@@ -1398,26 +1397,25 @@ async def test_extract_pdf_pages_with_labels(tmp_path: Path):
 
     with (
         patch("mcp_fuzzy_search._build_page_label_mapping") as mock_mapping,
-        patch("subprocess.Popen") as mock_popen,
+        patch("subprocess.run") as mock_run,
     ):
         # Mock page label mapping
         mock_mapping.return_value = {"iii": 0, "iv": 1, "v": 2, "1": 3}
 
         # Mock subprocess calls
-        mock_pdf_proc = MagicMock()
-        mock_pdf_proc.stdout = MagicMock()
-        mock_pdf_proc.wait.return_value = None
-        mock_pdf_proc.returncode = 0
-        mock_pdf_proc.communicate.return_value = (None, b"")
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = b"<p>HTML content from pages iii and iv</p>"
+        mock_pdf_result.stderr = b""
 
-        mock_pandoc_proc = MagicMock()
-        mock_pandoc_proc.communicate.return_value = (
-            "# Roman Numeral Pages\n\nContent from pages iii and iv\n",
-            None,
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = (
+            b"# Roman Numeral Pages\n\nContent from pages iii and iv\n"
         )
-        mock_pandoc_proc.returncode = 0
+        mock_pandoc_result.stderr = b""
 
-        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
 
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
             result = await client.call_tool(
@@ -1448,25 +1446,22 @@ async def test_extract_pdf_pages_with_ranges(tmp_path: Path):
 
     with (
         patch("mcp_fuzzy_search._build_page_label_mapping") as mock_mapping,
-        patch("subprocess.Popen") as mock_popen,
+        patch("subprocess.run") as mock_run,
     ):
         mock_mapping.return_value = {"iii": 0, "iv": 1, "v": 2, "vi": 3}
 
         # Mock subprocess calls
-        mock_pdf_proc = MagicMock()
-        mock_pdf_proc.stdout = MagicMock()
-        mock_pdf_proc.wait.return_value = None
-        mock_pdf_proc.returncode = 0
-        mock_pdf_proc.communicate.return_value = (None, b"")
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = b"<p>HTML content for pages iii through v</p>"
+        mock_pdf_result.stderr = b""
 
-        mock_pandoc_proc = MagicMock()
-        mock_pandoc_proc.communicate.return_value = (
-            "# Range Content\n\nPages iii through v\n",
-            None,
-        )
-        mock_pandoc_proc.returncode = 0
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = b"# Range Content\n\nPages iii through v\n"
+        mock_pandoc_result.stderr = b""
 
-        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
 
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
             result = await client.call_tool(
@@ -1492,26 +1487,25 @@ async def test_extract_pdf_pages_mixed_specs(tmp_path: Path):
 
     with (
         patch("mcp_fuzzy_search._build_page_label_mapping") as mock_mapping,
-        patch("subprocess.Popen") as mock_popen,
+        patch("subprocess.run") as mock_run,
     ):
         # Only some pages have labels
         mock_mapping.return_value = {"iii": 0, "iv": 1}
 
         # Mock subprocess calls
-        mock_pdf_proc = MagicMock()
-        mock_pdf_proc.stdout = MagicMock()
-        mock_pdf_proc.wait.return_value = None
-        mock_pdf_proc.returncode = 0
-        mock_pdf_proc.communicate.return_value = (None, b"")
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = b"<p>HTML content for mixed pages</p>"
+        mock_pdf_result.stderr = b""
 
-        mock_pandoc_proc = MagicMock()
-        mock_pandoc_proc.communicate.return_value = (
-            "# Mixed Content\n\nMixed page specifications\n",
-            None,
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = (
+            b"# Mixed Content\n\nMixed page specifications\n"
         )
-        mock_pandoc_proc.returncode = 0
+        mock_pandoc_result.stderr = b""
 
-        mock_popen.side_effect = [mock_pdf_proc, mock_pandoc_proc]
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
 
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
             # Mix of labels and numeric indices
@@ -1522,6 +1516,210 @@ async def test_extract_pdf_pages_mixed_specs(tmp_path: Path):
 
             data = json.loads(result.content[0].text)
 
-            # Should extract pages 0 (iii), 5 (numeric), 1 (iv) -> order preserved: [0, 5, 1]
-            assert data["pages_extracted"] == [0, 5, 1]
+            # Should extract pages 0 (iii), 4 (page 5 -> index 4), 1 (iv) -> order preserved: [0, 4, 1]
+            assert data["pages_extracted"] == [0, 4, 1]
             assert data["page_labels"] == ["iii", "iv"]  # Only the label-based ones
+
+
+# ---------------------------------------------------------------------------
+# Clean HTML Tests
+# ---------------------------------------------------------------------------
+
+
+async def test_extract_pdf_pages_clean_html_true(tmp_path: Path):
+    """Test extract_pdf_pages with clean_html=True strips HTML styling."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    # HTML output with styling from pdf2txt
+    html_with_styling = (
+        '<p><span style="font-family: TimesLTPro-Roman; font-size:9px">'
+        "Text with styling</span></p>"
+        '<div style="color: red; background-color: yellow;">'
+        "Styled div content</div>"
+        "<!-- HTML comment -->"
+    )
+
+    with patch("subprocess.run") as mock_run:
+        # Mock pdf2txt process returning HTML with styling
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = html_with_styling.encode()
+        mock_pdf_result.stderr = b""
+
+        # Mock pandoc process returning clean markdown
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = b"Text with styling\n\nStyled div content\n"
+        mock_pandoc_result.stderr = b""
+
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {
+                    "file": str(test_pdf),
+                    "pages": "1",
+                    "format": "markdown",
+                    "clean_html": True,
+                },
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "content" in data
+            assert data["format"] == "markdown"
+
+            # Verify pandoc was called with clean HTML arguments
+            pandoc_call = mock_run.call_args_list[1]
+            pandoc_args = pandoc_call[0][0]
+            assert "--from=html-native_divs-native_spans" in pandoc_args
+            assert (
+                "--to=markdown-raw_html-native_divs-native_spans+tex_math_dollars"
+                in pandoc_args
+            )
+            assert "--strip-comments" in pandoc_args
+
+            # Content should not contain HTML styling
+            content = data["content"]
+            assert "font-family" not in content
+            assert "font-size" not in content
+            assert "<span" not in content
+            assert "<div" not in content
+            assert "style=" not in content
+
+
+async def test_extract_pdf_pages_clean_html_false(tmp_path: Path):
+    """Test extract_pdf_pages with clean_html=False preserves HTML styling."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    # HTML output with styling from pdf2txt
+    html_with_styling = (
+        '<p><span style="font-family: TimesLTPro-Roman; font-size:9px">'
+        "Text with styling</span></p>"
+    )
+
+    with patch("subprocess.run") as mock_run:
+        # Mock pdf2txt process
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = html_with_styling.encode()
+        mock_pdf_result.stderr = b""
+
+        # Mock pandoc process preserving HTML
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = b'<span style="font-family: TimesLTPro-Roman; font-size:9px">Text with styling</span>\n'
+        mock_pandoc_result.stderr = b""
+
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {
+                    "file": str(test_pdf),
+                    "pages": "1",
+                    "format": "markdown",
+                    "clean_html": False,
+                },
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "content" in data
+
+            # Verify pandoc was called with standard arguments (no cleaning)
+            pandoc_call = mock_run.call_args_list[1]
+            pandoc_args = pandoc_call[0][0]
+            assert "--from=html" in pandoc_args
+            assert "--to=gfm+tex_math_dollars" in pandoc_args
+            assert "--strip-comments" not in pandoc_args
+
+
+async def test_extract_pdf_pages_clean_html_plain_format(tmp_path: Path):
+    """Test extract_pdf_pages with clean_html=True and plain format."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    html_with_styling = '<span style="font-size:12px">Plain text content</span>'
+
+    with patch("subprocess.run") as mock_run:
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = html_with_styling.encode()
+        mock_pdf_result.stderr = b""
+
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = b"Plain text content\n"
+        mock_pandoc_result.stderr = b""
+
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {
+                    "file": str(test_pdf),
+                    "pages": "1",
+                    "format": "plain",
+                    "clean_html": True,
+                },
+            )
+
+            data = json.loads(result.content[0].text)
+            assert data["format"] == "plain"
+
+            # Verify pandoc was called with clean arguments for plain format
+            pandoc_call = mock_run.call_args_list[1]
+            pandoc_args = pandoc_call[0][0]
+            assert "--from=html-native_divs-native_spans" in pandoc_args
+            assert "--to=plain" in pandoc_args
+
+
+async def test_extract_pdf_pages_clean_html_default_true(tmp_path: Path):
+    """Test extract_pdf_pages has clean_html=True by default."""
+    _skip_if_missing("pdf2txt.py")
+    _skip_if_missing("pandoc")
+
+    test_pdf = tmp_path / "test.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    with patch("subprocess.run") as mock_run:
+        mock_pdf_result = MagicMock()
+        mock_pdf_result.returncode = 0
+        mock_pdf_result.stdout = b'<span style="font-size:12px">Content</span>'
+        mock_pdf_result.stderr = b""
+
+        mock_pandoc_result = MagicMock()
+        mock_pandoc_result.returncode = 0
+        mock_pandoc_result.stdout = b"Content\n"
+        mock_pandoc_result.stderr = b""
+
+        mock_run.side_effect = [mock_pdf_result, mock_pandoc_result]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            # Don't specify clean_html parameter - should default to True
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {"file": str(test_pdf), "pages": "1", "format": "markdown"},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "content" in data
+
+            # Should use clean HTML arguments by default
+            pandoc_call = mock_run.call_args_list[1]
+            pandoc_args = pandoc_call[0][0]
+            assert "--from=html-native_divs-native_spans" in pandoc_args
+            assert "--strip-comments" in pandoc_args

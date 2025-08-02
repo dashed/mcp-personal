@@ -1,11 +1,10 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["mcp>=0.1.0"]
+# dependencies = ["mcp>=0.1.0", "PyMuPDF>=1.23.0"]
 #
 # [project.optional-dependencies]
 # dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0"]
-# pdf = ["pdfminer.six>=20221105"]
 # ///
 """
 `mcp_fuzzy_search.py` – **Model Context Protocol** server for fuzzy searching
@@ -49,235 +48,429 @@ SPACES MATTER - THEY SEPARATE SEARCH PATTERNS!
 
 ADVANCED FZF FEATURES (from source code analysis)
 ------------------------------------------------
-- Smart Case: Case-insensitive by default, case-sensitive if query has uppercase
-- Normalization: Accented chars normalized (café → cafe) unless --literal used
-- Exact Boundary Match: ''word'' matches at word boundaries (_ counts as boundary)
-- Scoring: Matches at word boundaries, path separators, camelCase get bonus points
+1. Smart Case: lowercase = case-insensitive, MixedCase = case-sensitive
+2. Exact match prefix: 'exact → disables fuzzy matching
+3. Exact boundary match: ''exact'' → matches at word boundaries
+4. Scoring algorithm: Length, position, and consecutiveness affect ranking
+5. Extended search mode: Always enabled, allows complex queries
+6. ANSI color codes: Automatically stripped before matching
+7. Multi-select: Not used (we process all matches)
+8. Latin script normalization: café matches cafe (unless --literal is used)
 
-Key Features
+Examples
+--------
+# Find Python files containing 'update' AND 'config':
+fuzzy_search_content('update config', path='src/', rg_flags='-t py')
+
+# Find test functions for seer credit operations:
+fuzzy_search_content('def test_ seer credit')
+
+# Find all TODO comments related to auth (case-insensitive):
+fuzzy_search_content("TODO auth", rg_flags="-i")
+
+# Find React components with 'Modal' in the name:
+fuzzy_search_files('Modal tsx$ | jsx$')
+
+# Content-only mode - find 'className' in code without matching filenames:
+fuzzy_search_content('className', content_only=True)
+
+Requirements
 -----------
-- Searches through ALL file contents by default
-- Uses fuzzy matching to find relevant lines (NOT regex!)
-- Supports advanced fzf syntax (OR, exact match, exclusions)
-- Can be optimized with rg_flags for specific file types
+* **ripgrep** (rg) – https://github.com/BurntSushi/ripgrep
+* **fzf** – https://github.com/junegunn/fzf
+* Python 3.10+
 
-Quick start
------------
-```bash
-# Install required binaries
-brew install ripgrep fzf        # macOS
-# or apt install ripgrep fzf    # Debian/Ubuntu
-
-# Optional: Install pdfminer.six for page label support in extract-pdf
-uv pip install "pdfminer.six>=20221105"  # or pip install
-
-chmod +x mcp_fuzzy_search.py
-
-# 1. CLI usage
-./mcp_fuzzy_search.py search-files "main" src
-./mcp_fuzzy_search.py search-content "TODO implement" .
-./mcp_fuzzy_search.py search-content "async await" . --content-only
-./mcp_fuzzy_search.py --examples  # Show usage examples
-
-# 2. Run as MCP server
-./mcp_fuzzy_search.py
-```
+Authors
+------
+Varol Aksoy (@vaksoy)
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
-import platform
+import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-# PDF processing imports (optional - only used for page label support)
 try:
-    from pdfminer.pdfdocument import PDFDocument
-    from pdfminer.pdfpage import PDFPage
-    from pdfminer.pdfparser import PDFParser
-
-    PDFMINER_AVAILABLE = True
+    import fitz  # PyMuPDF
+    PYMUPDF_AVAILABLE = True
 except ImportError:
-    PDFMINER_AVAILABLE = False
+    PYMUPDF_AVAILABLE = False
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
+# Tool names as seen by LLMs
+FUZZY_SEARCH_FILES_TOOL = "fuzzy_search_files"
+FUZZY_SEARCH_CONTENT_TOOL = "fuzzy_search_content"
+FUZZY_SEARCH_DOCUMENTS_TOOL = "fuzzy_search_documents"
+EXTRACT_PDF_PAGES_TOOL = "extract_pdf_pages"
+
+# Default parameters
+DEFAULT_PATH = "."
+DEFAULT_LIMIT = 20
+DEFAULT_HIDDEN = False
+DEFAULT_MULTILINE = False
+
+# Executables - will check availability at startup
+RG_EXECUTABLE = shutil.which("rg")
+FZF_EXECUTABLE = shutil.which("fzf")
+RGA_EXECUTABLE = shutil.which("rga")
+PANDOC_EXECUTABLE = shutil.which("pandoc")
+
+# Logger
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Binary discovery
-# ---------------------------------------------------------------------------
-
-RG_EXECUTABLE: str | None = shutil.which("rg")
-FZF_EXECUTABLE: str | None = shutil.which("fzf")
-RGA_EXECUTABLE: str | None = shutil.which("rga")
-PDF2TXT_EXECUTABLE: str | None = shutil.which("pdf2txt.py")
-PANDOC_EXECUTABLE: str | None = shutil.which("pandoc")
-
-# Platform detection
-IS_WINDOWS = platform.system() == "Windows"
-
-
-def _normalize_path(path: str) -> str:
-    """Normalize path to use forward slashes consistently across platforms."""
-    # Replace backslashes with forward slashes for cross-platform consistency
-    # This handles Windows paths even when running on Unix systems
-    return path.replace("\\", "/")
-
-
-def _parse_ripgrep_line(line: str) -> tuple[str, int, str] | None:
-    """Parse a ripgrep output line, handling Windows paths correctly.
-
-    Returns (file_path, line_number, content) or None if parsing fails.
-    """
-    if not line:
-        return None
-
-    # On Windows, check if line starts with a drive letter (e.g., C:\)
-    if IS_WINDOWS and len(line) >= 3 and line[1] == ":" and line[0].isalpha():
-        # Windows path format: C:\path\file.py:10:content
-        parts = line.split(":", 3)
-        if len(parts) >= 4:
-            try:
-                file_path = parts[0] + ":" + parts[1]  # C:\path\file.py
-                line_num = int(parts[2])
-                content = parts[3] if len(parts) > 3 else ""
-                return (_normalize_path(file_path), line_num, content.strip())
-            except (ValueError, IndexError):
-                return None
-    else:
-        # Unix path format: /path/file.py:10:content
-        parts = line.split(":", 2)
-        if len(parts) >= 3:
-            try:
-                return (_normalize_path(parts[0]), int(parts[1]), parts[2].strip())
-            except (ValueError, IndexError):
-                return None
-
-    return None
-
-
-def _looks_like_regex(text: str) -> bool:
-    """Detect if a string looks like a regex pattern rather than fuzzy search terms."""
-    import re
-
-    # Common regex metacharacters and patterns
-    regex_indicators = [
-        r"\.\*",  # .* (any characters)
-        r"\.\+",  # .+ (one or more)
-        r"\\\w",  # \w (word character)
-        r"\\\d",  # \d (digit)
-        r"\\\s",  # \s (whitespace)
-        r"\[.*\]",  # [abc] character class
-        r"\{.*\}",  # {n,m} quantifiers
-        r"\(\?",  # (? special groups
-        r"\$\s*$",  # $ at end
-        r"^\s*\^",  # ^ at start
-    ]
-
-    # Check if string contains regex metacharacters
-    for pattern in regex_indicators:
-        if re.search(pattern, text):
-            return True
-
-    # Check for escaped characters
-    if text.count("\\") > 0:
-        return True
-
-    return False
-
-
-def _suggest_fuzzy_terms(regex_pattern: str) -> str:
-    """Convert a regex pattern to suggested fuzzy search terms."""
-    import re
-
-    # Remove common regex metacharacters
-    fuzzy = regex_pattern
-
-    # Replace regex patterns with spaces
-    replacements = [
-        (r"\.\*", " "),
-        (r"\.\+", " "),
-        (r"\.", ""),
-        (r"\^", ""),
-        (r"\$", ""),
-        (r"\[([^\]]+)\]", r"\1"),  # [abc] -> abc
-        (r"\{[^\}]+\}", ""),
-        (r"[\\()]", ""),
-        (r"_", " "),  # Common in function names
-    ]
-
-    for pattern, replacement in replacements:
-        fuzzy = re.sub(pattern, replacement, fuzzy)
-
-    # Clean up multiple spaces and trim
-    fuzzy = " ".join(fuzzy.split())
-
-    return fuzzy if fuzzy else "try using space-separated words"
-
-
-def _run_ripgrep_only(
-    pattern: str, path: str, hidden: bool = False, rg_flags: str = ""
-) -> int:
-    """Run ripgrep and return the number of matches found."""
-    rg_bin = _require(RG_EXECUTABLE, "rg")
-
-    cmd = [rg_bin, "--count-matches", "--no-heading", "--color=never"]
-    if hidden:
-        cmd.append("--hidden")
-    if rg_flags:
-        cmd.extend(shlex.split(rg_flags))
-    cmd.extend([pattern, str(Path(path).resolve())])
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            # Sum up all match counts
-            total = 0
-            for line in result.stdout.splitlines():
-                if ":" in line:
-                    parts = line.rsplit(":", 1)
-                    if len(parts) == 2 and parts[1].isdigit():
-                        total += int(parts[1])
-            return total
-    except Exception:
-        pass
-
-    return 0
-
-
-class BinaryMissing(RuntimeError):
-    """Raised when a required CLI binary is missing from PATH."""
-
-
-def _require(binary: str | None, name: str) -> str:
-    if not binary:
-        raise BinaryMissing(
-            f"Cannot find the `{name}` binary on PATH. Install it first."
-        )
-    return binary
 
 
 # ---------------------------------------------------------------------------
 # FastMCP server instance
 # ---------------------------------------------------------------------------
-
 mcp = FastMCP("fuzzy-search")
+
+
+def _require(exe: str | None, name: str) -> str:
+    """Ensure required executable exists."""
+    if not exe:
+        raise RuntimeError(f"{name} not found. Please install it first.")
+    return exe
+
+
+def _get_page_label(doc, page_idx: int) -> str:
+    """Get the label for a specific page index.
+    
+    Args:
+        doc: PyMuPDF document object
+        page_idx: 0-based page index
+    
+    Returns:
+        Page label string, or str(page_idx + 1) if no label
+    """
+    try:
+        # Use PyMuPDF's page.get_label() method
+        page = doc[page_idx]
+        if hasattr(page, 'get_label'):
+            label = page.get_label()
+            if label:
+                return label
+    except:
+        pass
+    
+    # Default to 1-based physical page number
+    return str(page_idx + 1)
+
+
+def _int_to_roman(num: int) -> str:
+    """Convert integer to Roman numerals."""
+    val = [
+        1000, 900, 500, 400,
+        100, 90, 50, 40,
+        10, 9, 5, 4, 1
+    ]
+    syms = [
+        'M', 'CM', 'D', 'CD',
+        'C', 'XC', 'L', 'XL',
+        'X', 'IX', 'V', 'IV', 'I'
+    ]
+    roman_num = ''
+    i = 0
+    while num > 0:
+        for _ in range(num // val[i]):
+            roman_num += syms[i]
+            num -= val[i]
+        i += 1
+    return roman_num
+
+
+def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
+    """Parse a page specification into 0-based page indices using PyMuPDF.
+    
+    Handles:
+    - Single labels: "v", "ToC", "14"
+    - Ranges: "v-vii", "1-5"
+    
+    Args:
+        page_spec: Page specification string
+        doc: PyMuPDF document object
+    
+    Returns:
+        List of 0-based page indices
+    """
+    indices = []
+    
+    # Handle range
+    if "-" in page_spec:
+        parts = page_spec.split("-", 1)
+        start_spec = parts[0].strip()
+        end_spec = parts[1].strip()
+        
+        # Resolve start using PyMuPDF's get_page_numbers
+        start_indices = doc.get_page_numbers(start_spec)
+        if not start_indices:
+            # Try as physical page number (1-based)
+            try:
+                page_num = int(start_spec)
+                if 1 <= page_num <= doc.page_count:
+                    start_indices = [page_num - 1]
+            except ValueError:
+                pass
+        
+        if not start_indices:
+            return []  # Invalid start
+        
+        # Resolve end
+        end_indices = doc.get_page_numbers(end_spec)
+        if not end_indices:
+            # Try as physical page number (1-based)
+            try:
+                page_num = int(end_spec)
+                if 1 <= page_num <= doc.page_count:
+                    end_indices = [page_num - 1]
+            except ValueError:
+                pass
+        
+        if not end_indices:
+            return []  # Invalid end
+        
+        # Generate range (inclusive) from first start to first end
+        start_idx = start_indices[0]
+        end_idx = end_indices[0]
+        indices = list(range(start_idx, end_idx + 1))
+    else:
+        # Single page - try PyMuPDF's get_page_numbers first
+        all_indices = doc.get_page_numbers(page_spec)
+        
+        if all_indices:
+            # Take only the first match (like PDF readers do)
+            indices = [all_indices[0]]
+        else:
+            # Try as physical page number (1-based)
+            try:
+                page_num = int(page_spec)
+                if 1 <= page_num <= doc.page_count:
+                    indices = [page_num - 1]
+            except ValueError:
+                pass
+    
+    return indices
+
+
+# ---------------------------------------------------------------------------
+# Tool: extract_pdf_pages
+# ---------------------------------------------------------------------------
+@mcp.tool(
+    description=(
+        "Extract specific pages from a PDF and convert to various formats.\n\n"
+        "Uses PyMuPDF for fast page extraction with direct page label support.\n\n"
+        "Args:\n"
+        "  file (str): Path to PDF file. Required.\n"
+        "  pages (str): Comma-separated page specifications. Required.\n"
+        "  format (str, optional): Output format (markdown,html,plain). Default: markdown.\n"
+        "  preserve_layout (bool, optional): Try to preserve layout. Default: false.\n"
+        "  clean_html (bool, optional): Strip HTML styling tags. Default: true.\n\n"
+        "Page specifications:\n"
+        "  - Page labels: 'v', 'vii', 'ToC', 'Introduction' (as shown in PDF readers)\n"
+        "  - Ranges: 'v-vii', '1-5'\n"
+        "  - Physical pages: '1', '14' (1-based if not found as label)\n"
+        "  - Mixed: 'v,vii,1,5-8,ToC'\n\n"
+        "Examples:\n"
+        "  Extract roman numeral pages: pages='v,vi,vii'\n"
+        "  Extract range: pages='v-vii'\n"
+        "  Extract by page number: pages='14'\n"
+        "  Extract mixed: pages='ToC,v-vii,1,2'\n\n"
+        "Returns: { content: string, pages_extracted: number[], page_labels: string[], format: string } or { error: string }"
+    )
+)
+def extract_pdf_pages(
+    file: str,
+    pages: str,
+    format: str = "markdown",
+    preserve_layout: bool = False,
+    clean_html: bool = True,
+) -> dict[str, Any]:
+    """Extract specific pages from PDF using PyMuPDF."""
+    if not file or not pages:
+        return {"error": "Both 'file' and 'pages' arguments are required"}
+    
+    # Check if PyMuPDF is available
+    if not PYMUPDF_AVAILABLE:
+        return {"error": "PyMuPDF is not installed. Install it with: pip install PyMuPDF"}
+    
+    # Check if file exists
+    pdf_path = Path(file)
+    if not pdf_path.exists():
+        return {"error": f"PDF file not found: {file}"}
+    
+    try:
+        # Open PDF with PyMuPDF
+        doc = fitz.open(pdf_path)
+        
+        # Parse page specifications
+        page_indices = []
+        page_labels_used = []
+        
+        for page_spec in pages.split(","):
+            page_spec = page_spec.strip()
+            if not page_spec:
+                continue
+            
+            spec_indices = _parse_page_spec_pymupdf(page_spec, doc)
+            if not spec_indices:
+                doc.close()
+                return {
+                    "error": f"Invalid page specification: '{page_spec}'. Not found as page label or valid page number."
+                }
+            
+            page_indices.extend(spec_indices)
+            
+            # Track which labels were used
+            # Check if this spec matched a label (not just a physical page number)
+            if doc.get_page_numbers(page_spec):
+                page_labels_used.append(page_spec)
+            elif "-" in page_spec:
+                # For ranges, track if they were label-based
+                parts = page_spec.split("-", 1)
+                if doc.get_page_numbers(parts[0].strip()) or doc.get_page_numbers(parts[1].strip()):
+                    page_labels_used.append(page_spec)
+        
+        if not page_indices:
+            doc.close()
+            return {"error": "No valid pages specified."}
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_indices = []
+        for idx in page_indices:
+            if idx not in seen:
+                seen.add(idx)
+                unique_indices.append(idx)
+        
+        # Extract content based on format
+        content_parts = []
+        
+        # Determine extraction format
+        if format == "html" or (format == "markdown" and PANDOC_EXECUTABLE):
+            # Extract as HTML for pandoc conversion
+            extract_format = "html"
+        else:
+            # Extract as plain text
+            extract_format = "text"
+        
+        # Extract pages
+        for idx in unique_indices:
+            page = doc[idx]
+            
+            # Get page label for context
+            labels = doc.get_page_labels()
+            page_label = labels[idx] if labels and idx < len(labels) else str(idx + 1)
+            
+            # Extract content
+            if extract_format == "html":
+                page_content = page.get_text("html")
+                # Clean HTML if requested
+                if clean_html:
+                    # Remove style attributes
+                    page_content = re.sub(r'\sstyle="[^"]*"', '', page_content)
+                    # Remove font tags
+                    page_content = re.sub(r'</?font[^>]*>', '', page_content)
+                    # Remove span tags but keep content
+                    page_content = re.sub(r'<span[^>]*>', '', page_content)
+                    page_content = re.sub(r'</span>', '', page_content)
+                
+                # Add page marker
+                content_parts.append(f'<div class="page" data-page="{idx + 1}" data-label="{page_label}">')
+                content_parts.append(page_content)
+                content_parts.append('</div>')
+            else:
+                # Plain text extraction
+                page_content = page.get_text("text")
+                # Add page marker
+                content_parts.append(f"\n[Page {idx + 1}] (Label: {page_label})\n")
+                content_parts.append(page_content)
+        
+        # Join content
+        if extract_format == "html":
+            full_content = "<html><body>" + "".join(content_parts) + "</body></html>"
+        else:
+            full_content = "\n".join(content_parts)
+        
+        # Convert format if needed
+        if format == "markdown" and extract_format == "html" and PANDOC_EXECUTABLE:
+            # Use pandoc to convert HTML to markdown
+            pandoc_bin = _require(PANDOC_EXECUTABLE, "pandoc")
+            
+            # Build pandoc command
+            if clean_html:
+                from_format = "html-native_divs-native_spans"
+                to_format = "gfm+tex_math_dollars-raw_html"
+            else:
+                from_format = "html"
+                to_format = "gfm+tex_math_dollars"
+            
+            pandoc_cmd = [
+                pandoc_bin,
+                f"--from={from_format}",
+                f"--to={to_format}",
+                "--wrap=none",
+            ]
+            
+            if clean_html:
+                pandoc_cmd.append("--strip-comments")
+            
+            # Run pandoc
+            try:
+                pandoc_proc = subprocess.run(
+                    pandoc_cmd,
+                    input=full_content.encode(),
+                    capture_output=True,
+                    check=False,
+                    timeout=30,
+                )
+                
+                if pandoc_proc.returncode != 0:
+                    return {"error": f"pandoc conversion failed: {pandoc_proc.stderr.decode()}"}
+                
+                content = pandoc_proc.stdout.decode()
+            except subprocess.TimeoutExpired:
+                return {"error": "pandoc conversion timed out"}
+            except Exception as e:
+                return {"error": f"pandoc conversion error: {e}"}
+        else:
+            content = full_content
+        
+        # Build response
+        # Get actual page labels for extracted pages
+        extracted_labels = []
+        for idx in unique_indices:
+            page = doc[idx]
+            label = page.get_label() if hasattr(page, 'get_label') else str(idx + 1)
+            extracted_labels.append(label)
+        
+        # Close the document
+        doc.close()
+        
+        return {
+            "content": content,
+            "pages_extracted": unique_indices,
+            "page_labels": extracted_labels,
+            "format": format,
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to extract pages: {str(e)}"}
+
 
 # ---------------------------------------------------------------------------
 # Tool: fuzzy_search_files
 # ---------------------------------------------------------------------------
-
-
 @mcp.tool(
     description=(
         "Search for file paths using fuzzy matching.\n\n"
@@ -340,22 +533,11 @@ def fuzzy_search_files(
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
-    # Check for potential parameter misuse
-    warnings = []
-    if _looks_like_regex(fuzzy_filter):
-        suggested_terms = _suggest_fuzzy_terms(fuzzy_filter)
-        warnings.append(
-            f"The 'fuzzy_filter' parameter contains regex-like patterns ({fuzzy_filter!r}). "
-            f"This parameter expects fuzzy search terms, not regex. "
-            f"Try: {suggested_terms!r}"
-        )
-
     try:
         if multiline:
             # For multiline mode, get file list first, then read contents
-            # Ensure path is properly formatted
             search_path = str(Path(path).resolve())
-            rg_list_cmd: list[str] = [rg_bin, "--files"]
+            rg_list_cmd = [rg_bin, "--files"]
             if hidden:
                 rg_list_cmd.append("--hidden")
             rg_list_cmd.append(search_path)
@@ -374,8 +556,7 @@ def fuzzy_search_files(
                     with path_obj.open("rb") as f:
                         content = f.read()
                         # Create record: filename: + content + null separator
-                        normalized_path = _normalize_path(file_path)
-                        record = f"{normalized_path}:\n".encode() + content + b"\0"
+                        record = f"{file_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except (OSError, UnicodeDecodeError):
                     continue  # Skip files that can't be read
@@ -384,7 +565,7 @@ def fuzzy_search_files(
                 return {"matches": []}
 
             # Use fzf with multiline support
-            fzf_cmd: list[str] = [
+            fzf_cmd = [
                 fzf_bin,
                 "--filter",
                 fuzzy_filter,
@@ -410,15 +591,14 @@ def fuzzy_search_files(
                             matches.append(chunk.decode("utf-8", errors="replace"))
         else:
             # Standard mode - file paths only
-            # Ensure path is properly formatted
             search_path = str(Path(path).resolve())
-            rg_cmd: list[str] = [rg_bin, "--files"]
+            rg_cmd = [rg_bin, "--files"]
             if hidden:
                 rg_cmd.append("--hidden")
             rg_cmd.append(search_path)
 
             # Pipe through fzf for fuzzy filtering
-            fzf_cmd: list[str] = [fzf_bin, "--filter", fuzzy_filter]
+            fzf_cmd = [fzf_bin, "--filter", fuzzy_filter]
 
             logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
@@ -433,17 +613,12 @@ def fuzzy_search_files(
             out, _ = fzf_proc.communicate()
             rg_proc.wait()
 
-            matches = [_normalize_path(p) for p in out.splitlines() if p]
+            matches = [p for p in out.splitlines() if p]
 
         # Apply limit
         matches = matches[:limit]
 
-        # Build result with warnings if any
-        result = {"matches": matches}
-        if warnings:
-            result["warnings"] = warnings
-
-        return result
+        return {"matches": matches}
     except subprocess.CalledProcessError as exc:
         return {"error": str(exc)}
     except Exception as exc:
@@ -453,8 +628,6 @@ def fuzzy_search_files(
 # ---------------------------------------------------------------------------
 # Tool: fuzzy_search_content
 # ---------------------------------------------------------------------------
-
-
 @mcp.tool(
     description=(
         "Search file contents using fuzzy filtering.\n\n"
@@ -539,26 +712,16 @@ def fuzzy_search_content(
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
 
-    # Check for potential parameter misuse
-    warnings = []
-    if _looks_like_regex(fuzzy_filter):
-        suggested_terms = _suggest_fuzzy_terms(fuzzy_filter)
-        warnings.append(
-            f"The 'fuzzy_filter' parameter contains regex-like patterns ({fuzzy_filter!r}). "
-            f"This parameter expects fuzzy search terms, not regex. "
-            f"Try: {suggested_terms!r}"
-        )
-
     try:
         if multiline:
             # For multiline mode, get files and treat each as a single record
-            rg_list_cmd: list[str] = [rg_bin, "--files"]
+            rg_list_cmd = [rg_bin, "--files"]
             if hidden:
                 rg_list_cmd.append("--hidden")
             if rg_flags:
                 # Filter out options that don't apply to --files
                 safe_flags = []
-                for flag in shlex.split(rg_flags):
+                for flag in rg_flags.split():
                     if flag not in [
                         "-n",
                         "--line-number",
@@ -568,7 +731,6 @@ def fuzzy_search_content(
                     ]:
                         safe_flags.append(flag)
                 rg_list_cmd.extend(safe_flags)
-            # Ensure path is properly formatted
             search_path = str(Path(path).resolve())
             rg_list_cmd.append(search_path)
 
@@ -585,12 +747,8 @@ def fuzzy_search_content(
                     path_obj = Path(file_path)
                     with path_obj.open("rb") as f:
                         content = f.read()
-                        # Only include files that match the pattern if not default
-                        # Always include all files since we're using "." pattern
-
                         # Create record: filename + content + null separator
-                        normalized_path = _normalize_path(file_path)
-                        record = f"{normalized_path}:\n".encode() + content + b"\0"
+                        record = f"{file_path}:\n".encode() + content + b"\0"
                         multiline_input += record
                 except (OSError, UnicodeDecodeError):
                     continue
@@ -599,7 +757,7 @@ def fuzzy_search_content(
                 return {"matches": []}
 
             # Use fzf with multiline support
-            fzf_cmd: list[str] = [
+            fzf_cmd = [
                 fzf_bin,
                 "--filter",
                 fuzzy_filter,
@@ -620,7 +778,6 @@ def fuzzy_search_content(
                         try:
                             decoded = chunk.decode("utf-8")
                             # Extract filename from first line
-                            # Format is: filepath:\ncontent
                             if ":\n" in decoded:
                                 file_part, content_part = decoded.split(":\n", 1)
                                 matches.append(
@@ -636,7 +793,7 @@ def fuzzy_search_content(
                             continue
         else:
             # Standard mode - line-by-line results
-            rg_cmd: list[str] = [
+            rg_cmd = [
                 rg_bin,
                 "--line-number",
                 "--no-heading",
@@ -645,8 +802,7 @@ def fuzzy_search_content(
             if hidden:
                 rg_cmd.append("--hidden")
             if rg_flags:
-                rg_cmd.extend(shlex.split(rg_flags))
-            # Ensure path is properly formatted
+                rg_cmd.extend(rg_flags.split())
             search_path = str(Path(path).resolve())
             rg_cmd.extend([".", search_path])  # Always search all lines
 
@@ -654,7 +810,7 @@ def fuzzy_search_content(
             # Default: match on file path (field 1) and content (field 3+), skip line number
             if content_only:
                 # Match only on content (field 3+), ignore file path and line number
-                fzf_cmd: list[str] = [
+                fzf_cmd = [
                     fzf_bin,
                     "--filter",
                     fuzzy_filter,
@@ -664,7 +820,7 @@ def fuzzy_search_content(
                 ]
             else:
                 # Match on file path (field 1) and content (field 3+), skip line number
-                fzf_cmd: list[str] = [
+                fzf_cmd = [
                     fzf_bin,
                     "--filter",
                     fuzzy_filter,
@@ -699,49 +855,24 @@ def fuzzy_search_content(
                 if not line:
                     continue
 
-                # Use the helper function to parse ripgrep output
-                parsed = _parse_ripgrep_line(line)
-                if parsed:
-                    file_path, line_num, content = parsed
-                    matches.append(
-                        {
-                            "file": file_path,
-                            "line": line_num,
-                            "content": content,
-                        }
-                    )
+                # Parse ripgrep output: file:line:content
+                parts = line.split(":", 2)
+                if len(parts) >= 3:
+                    try:
+                        matches.append(
+                            {
+                                "file": parts[0],
+                                "line": int(parts[1]),
+                                "content": parts[2].strip(),
+                            }
+                        )
+                    except (ValueError, IndexError):
+                        continue
 
         # Apply limit
         matches = matches[:limit]
 
-        # Add diagnostic information if no matches found
-        result: dict[str, Any] = {"matches": matches}
-
-        if warnings:
-            result["warnings"] = warnings
-
-        if not matches and not multiline:
-            # Run diagnostic check to see if ripgrep found anything
-            rg_match_count = _run_ripgrep_only(".", path, hidden, rg_flags)
-            if rg_match_count == 0:
-                result["diagnostic"] = (
-                    "No files found in the specified path. "
-                    "Check if the path exists and contains files."
-                )
-            else:
-                result["diagnostic"] = (
-                    f"Found {rg_match_count} lines in files, "
-                    f"but fuzzy filter '{fuzzy_filter}' matched none. "
-                )
-                if _looks_like_regex(fuzzy_filter):
-                    suggested = _suggest_fuzzy_terms(fuzzy_filter)
-                    result["diagnostic"] += f"\nTry fuzzy terms like: '{suggested}'"
-                else:
-                    result["diagnostic"] += (
-                        "\nTry different fuzzy search terms or check the file paths."
-                    )
-
-        return result
+        return {"matches": matches}
     except subprocess.CalledProcessError as exc:
         return {"error": str(exc)}
     except Exception as exc:
@@ -751,8 +882,6 @@ def fuzzy_search_content(
 # ---------------------------------------------------------------------------
 # Tool: fuzzy_search_documents
 # ---------------------------------------------------------------------------
-
-
 @mcp.tool(
     description=(
         "Search through PDFs and other document formats using ripgrep-all.\n\n"
@@ -798,94 +927,69 @@ def fuzzy_search_documents(
         search_path = str(Path(path).resolve())
         rga_cmd.extend([".", search_path])  # "." searches all content
 
-        # Execute rga and collect output for fzf
+        # Run rga and collect JSON output
         rga_proc = subprocess.Popen(
             rga_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
 
-        # Collect all lines for fzf filtering
-        lines_for_fzf = []
-        json_lines = []  # Store original JSON for later parsing
-
-        if rga_proc.stdout is None:
-            return {"error": "Failed to create subprocess stdout pipe"}
+        # Parse JSON lines and build formatted output for fzf
+        formatted_lines = []
+        line_to_data = {}  # Map formatted line to original data
 
         for line in rga_proc.stdout:
             if not line.strip():
                 continue
+
             try:
                 data = json.loads(line)
                 if data.get("type") == "match":
-                    match_data = data["data"]
-                    path_str = match_data["path"]["text"]
-                    lines_text = match_data["lines"]["text"].strip()
-
-                    # Extract page number from text if present
-                    page_match = re.match(r"Page (\d+):", lines_text)
-                    page_num = int(page_match.group(1)) if page_match else None
-
-                    # Format for fzf: path:content (similar to ripgrep output)
-                    fzf_line = f"{path_str}:{lines_text}"
-                    lines_for_fzf.append(fzf_line)
-                    json_lines.append((fzf_line, data))
-
+                    match_data = data.get("data", {})
+                    file_path = match_data.get("path", {}).get("text", "")
+                    line_num = match_data.get("line_number", 0)
+                    
+                    # Extract text from lines
+                    lines = match_data.get("lines", {})
+                    text = lines.get("text", "")
+                    
+                    # Build formatted line for fzf
+                    formatted = f"{file_path}:{line_num}:{text}"
+                    formatted_lines.append(formatted)
+                    
+                    # Store mapping for later reconstruction
+                    line_to_data[formatted] = {
+                        "file": file_path,
+                        "line": line_num,
+                        "content": text,
+                        "match_text": text,
+                        "page": line_num,  # For PDFs, line number often represents page
+                    }
             except json.JSONDecodeError:
                 continue
 
         rga_proc.wait()
 
-        if not lines_for_fzf:
+        if not formatted_lines:
             return {"matches": []}
 
-        # Use fzf to filter results
-        fzf_input = "\n".join(lines_for_fzf)
+        # Feed to fzf for fuzzy filtering
+        fzf_input = "\n".join(formatted_lines)
+        fzf_cmd = [fzf_bin, "--filter", fuzzy_filter]
+
         fzf_proc = subprocess.Popen(
-            [fzf_bin, "--filter", fuzzy_filter],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            text=True,
+            fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
         )
+        out, _ = fzf_proc.communicate(fzf_input)
 
-        fzf_output, _ = fzf_proc.communicate(fzf_input)
-
-        # Parse filtered results
+        # Build results from filtered lines
         matches = []
-        matched_lines = set(fzf_output.strip().splitlines())
+        for line in out.splitlines():
+            if line in line_to_data:
+                matches.append(line_to_data[line])
 
-        for fzf_line, json_data in json_lines:
-            if fzf_line in matched_lines:
-                match_data = json_data["data"]
-                path_str = match_data["path"]["text"]
-                lines_text = match_data["lines"]["text"].strip()
-
-                # Extract page number if present
-                page_match = re.match(r"Page (\d+): (.+)", lines_text)
-                if page_match:
-                    page_num = int(page_match.group(1))
-                    content = page_match.group(2)
-                else:
-                    page_num = None
-                    content = lines_text
-
-                # Get matched text from submatches
-                match_texts = []
-                for submatch in match_data.get("submatches", []):
-                    match_texts.append(submatch["match"]["text"])
-
-                matches.append(
-                    {
-                        "file": _normalize_path(path_str),
-                        "page": page_num,
-                        "content": content,
-                        "match_text": " ".join(match_texts) if match_texts else "",
-                    }
-                )
-
-                if len(matches) >= limit:
-                    break
+        # Apply limit
+        matches = matches[:limit]
 
         return {"matches": matches}
-
     except subprocess.CalledProcessError as exc:
         return {"error": str(exc)}
     except Exception as exc:
@@ -893,257 +997,10 @@ def fuzzy_search_documents(
 
 
 # ---------------------------------------------------------------------------
-# Helper: Build page label to index mapping
+# CLI
 # ---------------------------------------------------------------------------
-
-
-def _build_page_label_mapping(pdf_path: Path) -> dict[str, int]:
-    """Build a mapping from page labels to 0-based page indices.
-
-    Args:
-        pdf_path: Path to the PDF file
-
-    Returns:
-        Dictionary mapping page labels (e.g., "v", "vii", "1") to 0-based indices
-    """
-    if not PDFMINER_AVAILABLE:
-        return {}
-
-    label_to_index = {}
-
-    try:
-        with open(pdf_path, "rb") as fp:
-            parser = PDFParser(fp)
-            document = PDFDocument(parser)
-
-            for page_idx, page in enumerate(PDFPage.create_pages(document)):
-                if page.label:
-                    label_to_index[page.label] = page_idx
-
-    except Exception as e:
-        logger.debug(f"Could not extract page labels: {e}")
-
-    return label_to_index
-
-
-def _parse_page_spec(page_spec: str, label_mapping: dict[str, int]) -> list[int]:
-    """Parse a page specification into 0-based page indices.
-
-    Handles:
-    - Single labels: "v", "ToC", "1"
-    - Ranges: "v-vii", "1-5"
-    - Numeric fallback: If not found as label, treat as 0-based index
-
-    Args:
-        page_spec: Page specification string
-        label_mapping: Mapping from labels to 0-based indices
-
-    Returns:
-        List of 0-based page indices
-    """
-    indices = []
-
-    # Handle range (e.g., "v-vii")
-    if "-" in page_spec and page_spec.count("-") == 1:
-        start_spec, end_spec = page_spec.split("-", 1)
-        start_spec = start_spec.strip()
-        end_spec = end_spec.strip()
-
-        # Try to resolve as labels first
-        start_idx = label_mapping.get(start_spec)
-        end_idx = label_mapping.get(end_spec)
-
-        # Fallback to numeric if not found as labels
-        if start_idx is None and start_spec.isdigit():
-            start_idx = int(start_spec)
-        if end_idx is None and end_spec.isdigit():
-            end_idx = int(end_spec)
-
-        if start_idx is not None and end_idx is not None:
-            # Include both start and end in range
-            indices.extend(range(start_idx, end_idx + 1))
-    else:
-        # Single page
-        page_spec = page_spec.strip()
-
-        # Try as label first
-        idx = label_mapping.get(page_spec)
-
-        # Fallback to numeric if not found as label
-        if idx is None and page_spec.isdigit():
-            idx = int(page_spec)
-
-        if idx is not None:
-            indices.append(idx)
-
-    return indices
-
-
-# ---------------------------------------------------------------------------
-# Tool: extract_pdf_pages
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool(
-    description=(
-        "Extract specific pages from a PDF and convert to various formats.\n\n"
-        "Uses pdf2txt.py to extract pages and pandoc for format conversion.\n\n"
-        "Args:\n"
-        "  file (str): Path to PDF file. Required.\n"
-        "  pages (str): Comma-separated page specifications. Required.\n"
-        "  format (str, optional): Output format (markdown,html,plain). Default: markdown.\n"
-        "  preserve_layout (bool, optional): Try to preserve layout. Default: false.\n\n"
-        "Page specifications:\n"
-        "  - Page labels: 'v', 'vii', 'ToC', 'Introduction' (as shown in PDF readers)\n"
-        "  - Ranges: 'v-vii', '1-5'\n"
-        "  - Numeric: '0', '14' (treated as label first, then 0-based index if not found)\n"
-        "  - Mixed: 'v,vii,1,5-8,ToC'\n\n"
-        "Examples:\n"
-        "  Extract roman numeral pages: pages='v,vi,vii'\n"
-        "  Extract range: pages='v-vii'\n"
-        "  Extract by 0-based index: pages='14' (if '14' is not a page label)\n"
-        "  Extract mixed: pages='ToC,v-vii,1,2'\n\n"
-        "Returns: { content: string, pages_extracted: number[], page_labels: string[], format: string } or { error: string }"
-    )
-)
-def extract_pdf_pages(
-    file: str,
-    pages: str,
-    format: str = "markdown",
-    preserve_layout: bool = False,
-) -> dict[str, Any]:
-    """Extract specific pages from PDF with format conversion."""
-    if not file or not pages:
-        return {"error": "Both 'file' and 'pages' arguments are required"}
-
-    # Check if required binaries are available
-    if not PDF2TXT_EXECUTABLE:
-        return {"error": "pdf2txt.py is not installed. Install pdfminer.six first."}
-    if not PANDOC_EXECUTABLE:
-        return {"error": "pandoc is not installed. Install it first."}
-
-    pdf2txt_bin = _require(PDF2TXT_EXECUTABLE, "pdf2txt.py")
-    pandoc_bin = _require(PANDOC_EXECUTABLE, "pandoc")
-
-    # Check if file exists
-    pdf_path = Path(file)
-    if not pdf_path.exists():
-        return {"error": f"PDF file not found: {file}"}
-
-    # Build page label mapping
-    label_mapping = _build_page_label_mapping(pdf_path)
-
-    # Parse page specifications
-    page_indices = []
-    page_labels_used = []
-
-    for page_spec in pages.split(","):
-        page_spec = page_spec.strip()
-        if not page_spec:
-            continue
-
-        spec_indices = _parse_page_spec(page_spec, label_mapping)
-        if not spec_indices:
-            return {
-                "error": f"Invalid page specification: '{page_spec}'. Not found as page label or valid index."
-            }
-
-        page_indices.extend(spec_indices)
-
-        # Track which labels were used for response
-        if page_spec in label_mapping:
-            page_labels_used.append(page_spec)
-        elif "-" in page_spec:
-            # For ranges, track if they were label-based
-            parts = page_spec.split("-", 1)
-            if parts[0].strip() in label_mapping or parts[1].strip() in label_mapping:
-                page_labels_used.append(page_spec)
-
-    if not page_indices:
-        return {"error": "No valid pages specified."}
-
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_indices = []
-    for idx in page_indices:
-        if idx not in seen:
-            seen.add(idx)
-            unique_indices.append(idx)
-
-    # Convert to 1-based for pdf2txt.py
-    page_list = [idx + 1 for idx in unique_indices]
-
-    try:
-        # Build pdf2txt command - file path must come before options
-        pdf_cmd = [pdf2txt_bin, str(pdf_path.resolve()), "-t", "html"]
-
-        # Add page numbers
-        pdf_cmd.append("--page-numbers")
-        pdf_cmd.extend([str(p) for p in page_list])
-
-        # Add layout preservation if requested
-        if preserve_layout:
-            pdf_cmd.extend(["-Y", "exact"])
-
-        # Map format to pandoc format
-        pandoc_formats = {
-            "markdown": "gfm+tex_math_dollars",
-            "html": "html",
-            "plain": "plain",
-            "latex": "latex",
-            "docx": "docx",
-        }
-
-        pandoc_format = pandoc_formats.get(format, "gfm+tex_math_dollars")
-
-        # Build pandoc command
-        pandoc_cmd = [pandoc_bin, "--from=html", f"--to={pandoc_format}", "--wrap=none"]
-
-        # Execute pipeline
-        pdf_proc = subprocess.Popen(
-            pdf_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-
-        pandoc_proc = subprocess.Popen(
-            pandoc_cmd,
-            stdin=pdf_proc.stdout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        pdf_proc.stdout.close()
-
-        content, pandoc_err = pandoc_proc.communicate()
-        pdf_proc.wait()
-
-        if pdf_proc.returncode != 0:
-            _, pdf_err = pdf_proc.communicate()
-            return {"error": f"pdf2txt failed: {pdf_err.decode()}"}
-
-        if pandoc_proc.returncode != 0:
-            return {"error": f"pandoc failed: {pandoc_err}"}
-
-        return {
-            "content": content,
-            "pages_extracted": unique_indices,  # Return 0-based indices
-            "page_labels": page_labels_used,
-            "format": format,
-        }
-
-    except subprocess.CalledProcessError as exc:
-        return {"error": str(exc)}
-    except Exception as exc:
-        return {"error": str(exc)}
-
-
-# ---------------------------------------------------------------------------
-# CLI helper
-# ---------------------------------------------------------------------------
-
-
-def _show_examples() -> None:
-    """Display interactive examples for using the fuzzy search tools."""
+def _print_examples():
+    """Print interactive examples and usage patterns."""
     examples = """
 FUZZY SEARCH EXAMPLES
 ====================
@@ -1248,59 +1105,61 @@ def _cli() -> None:
     )
 
     # search-content subcommand
-    p_content = sub.add_parser(
-        "search-content", help="Search all content with fuzzy filter"
-    )
-    p_content.add_argument(
-        "fuzzy_filter", help="fzf query: 'TODO implement .py: !test'"
-    )
-    p_content.add_argument(
-        "path", nargs="?", default=".", help="Directory/file to search"
-    )
-    # Removed --regex-pattern argument as we always use "." now
-    p_content.add_argument("--hidden", action="store_true", help="Search hidden files")
+    p_content = sub.add_parser("search-content", help="Fuzzy search file content")
+    p_content.add_argument("fuzzy_filter", help="fzf query: 'update !test TODO'")
+    p_content.add_argument("path", nargs="?", default=".", help="Directory to search")
+    p_content.add_argument("--hidden", action="store_true", help="Include hidden files")
     p_content.add_argument("--limit", type=int, default=20, help="Max results")
-    p_content.add_argument("--rg-flags", default="", help="rg flags: '-i -C 3 -t py'")
+    p_content.add_argument("--rg-flags", default="", help="Extra ripgrep flags")
     p_content.add_argument(
-        "--multiline", action="store_true", help="Multiline record processing"
+        "--multiline", action="store_true", help="Search multiline records"
     )
     p_content.add_argument(
         "--content-only",
         action="store_true",
-        help="Match only on content, ignore file paths",
+        help="Match only content, ignore file paths",
     )
 
     # search-documents subcommand
-    p_docs = sub.add_parser(
-        "search-documents", help="Search through PDFs and documents"
+    p_docs = sub.add_parser("search-documents", help="Search PDFs and documents")
+    p_docs.add_argument("fuzzy_filter", help="fzf query")
+    p_docs.add_argument("path", nargs="?", default=".", help="Directory to search")
+    p_docs.add_argument(
+        "--file-types", default="", help="Comma-separated types (pdf,docx,epub)"
     )
-    p_docs.add_argument("fuzzy_filter", help="fzf query for document search")
-    p_docs.add_argument("path", nargs="?", default=".", help="Directory/file to search")
-    p_docs.add_argument("--file-types", default="", help="Comma-separated file types")
     p_docs.add_argument("--limit", type=int, default=20, help="Max results")
 
     # extract-pdf subcommand
     p_pdf = sub.add_parser("extract-pdf", help="Extract pages from PDF")
     p_pdf.add_argument("file", help="PDF file path")
+    p_pdf.add_argument("pages", help="Pages: 'v,vii,1,5-8,ToC'")
     p_pdf.add_argument(
-        "pages", help="Page specs: labels (v,ToC), ranges (v-vii), or 0-based indices"
+        "--format",
+        default="markdown",
+        choices=["markdown", "html", "plain"],
+        help="Output format",
     )
     p_pdf.add_argument(
-        "--format", default="markdown", help="Output format (markdown/html/plain)"
+        "--preserve-layout", action="store_true", help="Preserve layout"
     )
-    p_pdf.add_argument("--preserve-layout", action="store_true", help="Preserve layout")
+    p_pdf.add_argument(
+        "--no-clean-html",
+        dest="clean_html",
+        action="store_false",
+        help="Keep HTML styling",
+    )
 
     ns = parser.parse_args()
 
-    # Handle --examples flag
     if ns.examples:
-        _show_examples()
+        _print_examples()
         return
 
-    # Require a subcommand if not showing examples
     if not ns.cmd:
-        parser.error("Please specify a subcommand or use --examples")
+        parser.print_help()
+        return
 
+    # Execute command and print result
     if ns.cmd == "search-files":
         res = fuzzy_search_files(
             ns.fuzzy_filter, ns.path, ns.hidden, ns.limit, ns.multiline
@@ -1320,7 +1179,9 @@ def _cli() -> None:
             ns.fuzzy_filter, ns.path, ns.file_types, True, ns.limit
         )
     elif ns.cmd == "extract-pdf":
-        res = extract_pdf_pages(ns.file, ns.pages, ns.format, ns.preserve_layout)
+        res = extract_pdf_pages(
+            ns.file, ns.pages, ns.format, ns.preserve_layout, ns.clean_html
+        )
     else:
         parser.error(f"Unknown command: {ns.cmd}")
 
@@ -1330,7 +1191,6 @@ def _cli() -> None:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         _cli()
