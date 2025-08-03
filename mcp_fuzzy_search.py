@@ -1566,34 +1566,34 @@ def fuzzy_search_documents(
         matches = []
         fzf_output_lines = out.splitlines()
 
-        # Debug logging for Windows path issues
+        # Debug output for Windows path issues
         if platform.system() == "Windows" or os.environ.get("GITHUB_ACTIONS") == "true":
-            logger.debug(f"PDF search: fzf returned {len(fzf_output_lines)} lines")
-            logger.debug(f"PDF search: line_to_data has {len(line_to_data)} keys")
+            print(f"🔍 PDF search: fzf returned {len(fzf_output_lines)} lines")
+            print(f"🔍 PDF search: line_to_data has {len(line_to_data)} keys")
             if fzf_output_lines:
-                logger.debug(
-                    f"PDF search: first fzf output line: {repr(fzf_output_lines[0])}"
+                print(
+                    f"🔍 PDF search: first fzf output line: {repr(fzf_output_lines[0])}"
                 )
             if line_to_data:
                 first_key = list(line_to_data.keys())[0]
-                logger.debug(f"PDF search: first line_to_data key: {repr(first_key)}")
+                print(f"🔍 PDF search: first line_to_data key: {repr(first_key)}")
 
         for line in fzf_output_lines:
             if line in line_to_data:
                 matches.append(line_to_data[line])
             else:
-                # Debug logging for missing matches
+                # Debug output for missing matches
                 if (
                     platform.system() == "Windows"
                     or os.environ.get("GITHUB_ACTIONS") == "true"
                 ):
-                    logger.debug(
-                        f"PDF search: fzf output line not found in line_to_data: {repr(line)}"
+                    print(
+                        f"🔍 PDF search: fzf output line not found in line_to_data: {repr(line)}"
                     )
                     # Try to find a similar key for debugging
                     for key in line_to_data.keys():
                         if key.startswith(line.split(":")[0]):  # Same file path
-                            logger.debug(f"PDF search: similar key exists: {repr(key)}")
+                            print(f"🔍 PDF search: similar key exists: {repr(key)}")
                             break
 
         # Apply limit
