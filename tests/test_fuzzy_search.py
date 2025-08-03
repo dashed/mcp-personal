@@ -1349,6 +1349,66 @@ async def test_fuzzy_search_documents_with_file_types(tmp_path: Path):
             assert data["matches"] == []
 
 
+async def test_fuzzy_search_documents_preview_false(tmp_path: Path):
+    """Test fuzzy_search_documents with preview=False."""
+    _skip_if_missing("rga")
+    _skip_if_missing("fzf")
+
+    # Create a mock PDF file for testing
+    test_pdf = tmp_path / "test.pdf"
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    # Mock the rga JSON output with Page prefix
+    mock_rga_output = (
+        '''{"type":"match","data":{"path":{"text":"'''
+        + str(test_pdf)
+        + '''"},"lines":{"text":"Page 1: This is test content with more text"},"line_number":null,"absolute_offset":100,"submatches":[{"match":{"text":"test"},"start":8,"end":12}]}}
+{"type":"end","data":{"path":{"text":"'''
+        + str(test_pdf)
+        + """"},"binary_offset":null,"stats":{"elapsed":{"secs":0,"nanos":35222125,"human":"0.035222s"},"searches":1,"searches_with_match":1,"bytes_searched":1000,"bytes_printed":100,"matched_lines":1,"matches":1}}}"""
+    )
+
+    with patch("subprocess.Popen") as mock_popen:
+        # Mock rga process
+        mock_rga_proc = MagicMock()
+        mock_rga_proc.communicate.return_value = (mock_rga_output, "")
+        mock_rga_proc.wait.return_value = None
+
+        # Mock fzf process with shorter output (no preview)
+        mock_fzf_proc = MagicMock()
+        mock_fzf_proc.communicate.return_value = (
+            f"{str(test_pdf)}:0:This is test content\n",
+            None,
+        )
+
+        mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_documents",
+                {
+                    "fuzzy_filter": "test",
+                    "path": str(tmp_path),
+                    "preview": False,  # Test preview=False
+                },
+            )
+
+            # Check that --no-extended was passed to fzf
+            fzf_call = mock_popen.call_args_list[1]
+            args = fzf_call[0][0]
+            assert "--no-extended" in args  # Verify no extended mode for preview
+
+            data = json.loads(result.content[0].text)
+            assert "matches" in data
+            assert len(data["matches"]) == 1
+
+            match = data["matches"][0]
+            assert str(test_pdf) in match["file"]
+            assert match["content"] == "This is test content"  # Shorter without preview
+            assert match["match_text"] == "test"
+
+
 # ---------------------------------------------------------------------------
 # PDF Page Label Tests - Removed (PyMuPDF handles labels natively)
 # ---------------------------------------------------------------------------
