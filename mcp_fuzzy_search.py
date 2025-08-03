@@ -1170,7 +1170,7 @@ def fuzzy_search_content(
             if rg_flags:
                 rg_cmd.extend(rg_flags.split())
             search_path = str(Path(path).resolve())
-            rg_cmd.append(search_path)  # Search the specified path
+            rg_cmd.extend([".", search_path])  # Search for all content in the path
 
             # Pipe through fzf for fuzzy filtering
             # Default: match on file path (field 1) and content (field 3+), skip line number
