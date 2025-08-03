@@ -1313,6 +1313,19 @@ def fuzzy_search_content(
                     logger.debug("Parsing line %d: %r", i, line)
                 # Parse ripgrep output: file:line:content
                 parts = line.split(":", 2)
+
+                # Handle Windows drive letters (e.g., "C:\path\file.py:123:content")
+                if len(parts) >= 3 and len(parts[0]) == 1 and parts[0].isalpha():
+                    # Windows drive letter detected, rejoin first two parts
+                    # Split the rest to separate line number and content properly
+                    remaining = parts[2]
+                    colon_idx = remaining.find(":")
+                    if colon_idx != -1:
+                        file_path = parts[0] + ":" + parts[1]
+                        line_num = remaining[:colon_idx]
+                        content = remaining[colon_idx + 1 :]
+                        parts = [file_path, line_num, content]
+
                 if len(parts) >= 3:
                     try:
                         match = {
