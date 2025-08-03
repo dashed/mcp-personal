@@ -31,19 +31,23 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
-        sudo apt-get install -y fd-find fzf ripgrep
+        sudo apt-get install -y fd-find fzf ripgrep pandoc poppler-utils ffmpeg
+        # Install ripgrep-all (rga) from GitHub releases
+        wget https://github.com/phiresky/ripgrep-all/releases/latest/download/ripgrep_all-v0.10.6-x86_64-unknown-linux-musl.tar.gz
+        tar -xzf ripgrep_all-v0.10.6-x86_64-unknown-linux-musl.tar.gz
+        sudo cp ripgrep_all-v0.10.6-x86_64-unknown-linux-musl/rga /usr/local/bin/
         # Create symlink for fd (it's installed as fdfind on Ubuntu/Debian)
         sudo ln -s $(which fdfind) /usr/local/bin/fd || true
 
     - name: Install system dependencies (macOS)
       if: matrix.os == 'macos-latest'
       run: |
-        brew install fd fzf ripgrep
+        brew install fd fzf ripgrep rga pandoc poppler ffmpeg
 
     - name: Install system dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        choco install fd fzf ripgrep
+        choco install fd fzf ripgrep ripgrep-all
 
     - name: Verify system dependencies
       run: |
@@ -53,6 +57,14 @@ jobs:
         fzf --version || echo "fzf not found"
         echo "Checking ripgrep:"
         rg --version || echo "ripgrep not found"
+        echo "Checking ripgrep-all:"
+        rga --version || echo "ripgrep-all not found"
+        echo "Checking pandoc:"
+        pandoc --version || echo "pandoc not found"
+        echo "Checking poppler (pdftotext):"
+        pdftotext -v 2>&1 || echo "pdftotext not found"
+        echo "Checking ffmpeg:"
+        ffmpeg -version 2>&1 | head -1 || echo "ffmpeg not found"
 
     - name: Run CI checks
       run: make ci-local
