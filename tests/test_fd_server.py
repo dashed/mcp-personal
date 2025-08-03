@@ -481,25 +481,39 @@ monkeypatch = pytest.MonkeyPatch()
 
 def test_fd_flag_handling(tmp_path: Path):
     """Test that fzf exits with error code when no matches found."""
-    mock_fd = tmp_path / "fd"
-    mock_fd.write_text("""#!/usr/bin/env python3
+    if platform.system() == "Windows":
+        mock_fd = tmp_path / "fd.bat"
+        mock_fd.write_text("""@echo off
+echo file1.txt
+echo file2.log
+""")
+
+        mock_fzf = tmp_path / "fzf.bat"
+        mock_fzf.write_text("""@echo off
+rem fzf returns exit code 1 when no matches found
+exit /b 1
+""")
+    else:
+        mock_fd = tmp_path / "fd"
+        mock_fd.write_text("""#!/usr/bin/env python3
 import sys
 print("file1.txt")
 print("file2.log")
 sys.exit(0)
 """)
-    mock_fd.chmod(0o755)
+        mock_fd.chmod(0o755)
 
-    mock_fzf = tmp_path / "fzf"
-    mock_fzf.write_text("""#!/usr/bin/env python3
+        mock_fzf = tmp_path / "fzf"
+        mock_fzf.write_text("""#!/usr/bin/env python3
 import sys
 # fzf returns exit code 1 when no matches found
 sys.exit(1)
 """)
-    mock_fzf.chmod(0o755)
+        mock_fzf.chmod(0o755)
 
     with monkeypatch.context() as m:
-        m.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        m.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
 
         # Reload module globals to pick up new executables
         mcp_fd_server.FD_EXECUTABLE = shutil.which("fd") or shutil.which("fdfind")
