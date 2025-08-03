@@ -1013,8 +1013,10 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 
         # Mock the executable paths so the function doesn't return early
-        with patch.object(mcp_fuzzy_search, "RGA_EXECUTABLE", "/mock/rga"), \
-             patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"):
+        with (
+            patch.object(mcp_fuzzy_search, "RGA_EXECUTABLE", "/mock/rga"),
+            patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"),
+        ):
             # Mock PyMuPDF if available
             if mcp_fuzzy_search.PYMUPDF_AVAILABLE:
                 mock_doc = MagicMock()
@@ -1026,7 +1028,9 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
                 mock_doc.close.return_value = None
 
                 with patch("fitz.open", return_value=mock_doc):
-                    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                    async with client_session(
+                        mcp_fuzzy_search.mcp._mcp_server
+                    ) as client:
                         result = await client.call_tool(
                             "fuzzy_search_documents",
                             {"fuzzy_filter": "test", "path": str(tmp_path)},
@@ -1141,9 +1145,11 @@ async def test_fuzzy_search_documents_with_page_labels(tmp_path: Path):
         mock_doc.__getitem__.side_effect = mock_getitem
         mock_doc.close.return_value = None
 
-        with patch("fitz.open", return_value=mock_doc), \
-             patch.object(mcp_fuzzy_search, "RGA_EXECUTABLE", "/mock/rga"), \
-             patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"):
+        with (
+            patch("fitz.open", return_value=mock_doc),
+            patch.object(mcp_fuzzy_search, "RGA_EXECUTABLE", "/mock/rga"),
+            patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"),
+        ):
             async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
                 result = await client.call_tool(
                     "fuzzy_search_documents",
