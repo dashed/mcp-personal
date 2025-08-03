@@ -377,10 +377,12 @@ The fuzzy search server also works as a standalone CLI tool:
 ./mcp_fuzzy_search.py extract-pdf thesis.pdf "100-105" --preserve-layout  # Keep layout
 ./mcp_fuzzy_search.py extract-pdf book.pdf "1-50" --fuzzy-hint "neural network"  # Filter by content
 ./mcp_fuzzy_search.py extract-pdf book.pdf "0,266-273" --zero-based  # 0-based indices (pages 1, 267-274)
+./mcp_fuzzy_search.py extract-pdf book.pdf "1-50" --one-based  # 1-based indices (pages 1-50)
 
 # Get PDF information
-./mcp_fuzzy_search.py get-pdf-page-labels manual.pdf  # List all page labels
-./mcp_fuzzy_search.py get-pdf-page-count manual.pdf  # Get total page count
+./mcp_fuzzy_search.py page-labels manual.pdf  # List all page labels
+./mcp_fuzzy_search.py page-labels manual.pdf --start 100 --limit 20  # Get labels for pages 100-119
+./mcp_fuzzy_search.py page-count manual.pdf  # Get total page count
 ```
 
 ### SQLite Server
@@ -819,13 +821,19 @@ Search through PDFs and other document formats using ripgrep-all (requires optio
       "content": "topology.",  # Content without "Page N: " prefix
       "match_text": "topology",
       "page": 542,  # 1-based page number (from ripgrep-all)
+      "page_index_0based": 541,  # 0-based page index for programmatic access
       "page_label": "19"  # Actual PDF page label (only for PDFs with PyMuPDF)
     }
   ]
 }
 ```
 
-**Note:** For PDF files, the tool returns page labels as they appear in PDF readers (e.g., "vii", "ToC", "1"). The content field no longer includes the "Page N: " prefix for cleaner output.
+**Note:** For PDF files, the tool returns:
+- `page`: The 1-based page number from ripgrep-all (e.g., 542 means the 542nd page)
+- `page_index_0based`: The 0-based page index for programmatic access (e.g., 541 for page 542)
+- `page_label`: The actual page label as shown in PDF readers (e.g., "vii", "ToC", "19")
+
+The content field no longer includes the "Page N: " prefix for cleaner output.
 
 #### `extract_pdf_pages`
 Extract specific pages from a PDF and convert to various formats using PyMuPDF.
@@ -847,6 +855,12 @@ Extract specific pages from a PDF and convert to various formats using PyMuPDF.
   - When true, all numbers are treated as direct 0-based page indices
   - "0" = first page, "266" = 267th page, "0-4" = first 5 pages
   - No page label lookup is performed when this is true
+  - Cannot be used together with `one_based`
+- `one_based` (optional): Interpret page numbers as 1-based indices (default: false)
+  - When true, all numbers are treated as direct 1-based page indices
+  - "1" = first page, "267" = 267th page, "1-5" = first 5 pages
+  - No page label lookup is performed when this is true
+  - Cannot be used together with `zero_based`
 
 **Example:**
 ```python
@@ -864,6 +878,13 @@ Extract specific pages from a PDF and convert to various formats using PyMuPDF.
   "pages": "0,266-273",  # Direct 0-based indices: page 1 and pages 267-274
   "zero_based": true
 }
+
+# Example with one_based=true
+{
+  "file": "research_paper.pdf",
+  "pages": "1,267-274",  # Direct 1-based indices: pages 1, 267-274
+  "one_based": true
+}
 ```
 
 #### `get_pdf_page_labels`
@@ -873,6 +894,8 @@ Get all page labels from a PDF file.
 
 **Parameters:**
 - `file` (required): Path to PDF file
+- `start` (optional): 0-based start index for slicing results (default: 0)
+- `limit` (optional): Maximum number of labels to return (default: all pages)
 
 **Example:**
 ```python
@@ -895,6 +918,26 @@ Get all page labels from a PDF file.
     "9": "1",
     "10": "2",
     "11": "3"
+  },
+  "page_count": 150
+}
+
+# Example with slicing:
+{
+  "file": "research_paper.pdf",
+  "start": 100,
+  "limit": 20
+}
+
+# Returns subset like:
+{
+  "page_labels": {
+    "100": "87",
+    "101": "88",
+    "102": "89",
+    "103": "90",
+    "104": "91"
+    # ... up to 20 entries
   },
   "page_count": 150
 }

@@ -3,15 +3,22 @@
 ## [Unreleased]
 
 ### Added
+- **Page Labels Slicing**: Added optional `start` and `limit` parameters to `get_pdf_page_labels` tool
+  - `start`: 0-based index to begin retrieving labels (e.g., start=100 begins at page 100)
+  - `limit`: Maximum number of labels to return (e.g., limit=20 returns at most 20 labels)
+  - Useful for paginating through large PDFs or getting specific page ranges
+  - Available in both CLI (`--start`, `--limit`) and MCP tool interface
 - **PDF Page Label Support**: Enhanced `extract-pdf` tool to support page labels/aliases (e.g., "v-vii", "ToC", "i", "ii") as they appear in PDF readers
   - Migrated to PyMuPDF for native page label support with better performance
   - Added `_parse_page_spec_pymupdf()` function using PyMuPDF's `get_page_numbers()` API
   - Support for single labels, ranges, and mixed specifications
   - Direct page label extraction via PyMuPDF's page.get_label() method
-- **Zero-based Page Indexing**: Added `zero_based` flag to `extract-pdf` tool for direct 0-based page index access
-  - When enabled, all page numbers are interpreted as 0-based indices (0 = first page)
+- **Page Indexing Options**: Added flexible page indexing modes to `extract-pdf` tool
+  - `zero_based` flag: Interpret page numbers as 0-based indices (0 = first page)
+  - `one_based` flag: Interpret page numbers as 1-based indices (1 = first page)
   - Useful for programmatic access when page labels are not needed
-  - Available in both CLI (`--zero-based`) and MCP tool interface
+  - Available in both CLI (`--zero-based`, `--one-based`) and MCP tool interface
+  - Flags are mutually exclusive - only one indexing mode can be used at a time
 - **Page Labels in Document Search**: Enhanced `fuzzy_search_documents` to return page labels for PDF search results
   - Returns actual PDF page labels (e.g., "vii", "ToC", "1") alongside page numbers
   - Builds page index to label mapping using PyMuPDF for accurate label extraction
@@ -33,10 +40,11 @@
   - Simplified implementation with PyMuPDF's high-level APIs
   - Updated all PDF-related tests to mock PyMuPDF instead of subprocess/pdfminer
 - **Type Checking**: Replaced pyright with ty in Makefile for faster type checking
-- **Document Search Output**: Removed "Page N: " prefix from content field in `fuzzy_search_documents` results
-  - Content now shows just the text without the page prefix (e.g., "topology." instead of "Page 542: topology.")
-  - Page number is still available in the separate `page` field
-  - Makes the content cleaner and more suitable for display
+- **Document Search Output**: Improved `fuzzy_search_documents` results for better LLM consumption
+  - Removed "Page N: " prefix from content field (e.g., "topology." instead of "Page 542: topology.")
+  - Added `page_index_0based` field for 0-based page indexing alongside existing 1-based `page` field
+  - Makes programmatic page access clearer with both 1-based and 0-based indices
+  - Page number is available as `page` (1-based), `page_index_0based` (0-based), and `page_label` (PDF label)
 
 ### Fixed
 - **PDF Extraction HTML Output**: Fixed issue where PDF extraction was outputting HTML styling tags like `<span style="font-family: TimesLTPro-Roman; font-size:9px">`

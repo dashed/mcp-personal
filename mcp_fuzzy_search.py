@@ -227,6 +227,58 @@ def _parse_page_spec_zero_based(page_spec: str, doc) -> list[int]:
     return indices
 
 
+def _parse_page_spec_one_based(page_spec: str, doc) -> list[int]:
+    """Parse a page specification as 1-based indices directly.
+
+    Handles:
+    - Single indices: "1", "15", "267"
+    - Ranges: "1-5", "267-274"
+
+    Args:
+        page_spec: Page specification string (1-based indices)
+        doc: PyMuPDF document object
+
+    Returns:
+        List of 0-based page indices
+    """
+    indices = []
+
+    # Handle range
+    if "-" in page_spec:
+        parts = page_spec.split("-", 1)
+        try:
+            start = int(parts[0].strip())
+            end = int(parts[1].strip())
+
+            # Convert 1-based to 0-based
+            start_idx = start - 1
+            end_idx = end - 1
+
+            # Validate range
+            if start_idx < 0 or end_idx >= doc.page_count:
+                return []
+            if start_idx > end_idx:
+                return []
+
+            # Add all indices in range (inclusive)
+            indices.extend(range(start_idx, end_idx + 1))
+        except ValueError:
+            return []
+    else:
+        # Single page
+        try:
+            page_num = int(page_spec.strip())
+            # Convert 1-based to 0-based
+            page_idx = page_num - 1
+
+            if 0 <= page_idx < doc.page_count:
+                indices.append(page_idx)
+        except ValueError:
+            return []
+
+    return indices
+
+
 def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
     """Parse a page specification into 0-based page indices using PyMuPDF.
 
@@ -396,22 +448,32 @@ def _filter_pages_fuzzy(
         "  preserve_layout (bool, optional): Try to preserve layout. Default: false.\n"
         "  clean_html (bool, optional): Strip HTML styling tags. Default: true.\n"
         "  fuzzy_hint (str, optional): Fuzzy search to filter extracted pages by content.\n"
-        "  zero_based (bool, optional): Interpret page numbers as 0-based indices. Default: false.\n\n"
-        "Page specifications (when zero_based=false):\n"
+        "  zero_based (bool, optional): Interpret page numbers as 0-based indices. Default: false.\n"
+        "  one_based (bool, optional): Interpret page numbers as 1-based indices. Default: false.\n\n"
+        "Note: zero_based and one_based cannot be used together.\n\n"
+        "Page specifications (default - when both flags are false):\n"
         "  - Page labels: 'v', 'vii', 'ToC', 'Introduction' (as shown in PDF readers)\n"
         "  - Ranges: 'v-vii', '1-5'\n"
         "  - Physical pages: '1', '14' (1-based if not found as label)\n"
         "  - Mixed: 'v,vii,1,5-8,ToC'\n\n"
+        "Page specifications (when one_based=true):\n"
+        "  - Direct 1-based pages: '1', '15', '267' (physical page numbers)\n"
+        "  - Ranges: '1-5' (pages 1-5), '267-274' (pages 267-274)\n"
+        "  - Mixed: '1,2,267,574'\n"
+        "  - No label lookup performed - all numbers treated as 1-based pages\n\n"
         "Page specifications (when zero_based=true):\n"
         "  - Direct indices: '0', '14', '266' (0-based page indices)\n"
         "  - Ranges: '0-4' (pages 1-5), '266-273' (pages 267-274)\n"
-        "  - Mixed: '0,1,266,573'\n\n"
+        "  - Mixed: '0,1,266,573'\n"
+        "  - No label lookup performed - all numbers treated as 0-based indices\n\n"
         "Examples:\n"
         "  Extract roman numeral pages: pages='v,vi,vii'\n"
         "  Extract range: pages='v-vii'\n"
         "  Extract by page number: pages='14'\n"
         "  Extract mixed: pages='ToC,v-vii,1,2'\n"
         "  Extract with fuzzy filter: pages='1-50', fuzzy_hint='neural network'\n"
+        "  Extract with 1-based pages: pages='1,2,3', one_based=true (gets pages 1,2,3)\n"
+        "  Extract pages 267-274: pages='267-274', one_based=true\n"
         "  Extract with 0-based indices: pages='0,1,2', zero_based=true (gets pages 1,2,3)\n"
         "  Extract pages 267-274: pages='266-273', zero_based=true\n\n"
         "Returns: { content: string, pages_extracted: number[], page_labels: string[], format: string } or { error: string }"
@@ -425,6 +487,7 @@ def extract_pdf_pages(
     clean_html: bool = True,
     fuzzy_hint: str | None = None,
     zero_based: bool = False,
+    one_based: bool = False,
 ) -> dict[str, Any]:
     """Extract specific pages from PDF using PyMuPDF."""
     if not file or not pages:
@@ -454,13 +517,20 @@ def extract_pdf_pages(
             if not page_spec:
                 continue
 
-            # Use appropriate parsing function based on zero_based flag
+            # Use appropriate parsing function based on flags
             if zero_based:
                 spec_indices = _parse_page_spec_zero_based(page_spec, doc)
                 if not spec_indices:
                     doc.close()
                     return {
                         "error": f"Invalid page specification: '{page_spec}'. Must be a valid 0-based index or range (0 to {doc.page_count - 1})."
+                    }
+            elif one_based:
+                spec_indices = _parse_page_spec_one_based(page_spec, doc)
+                if not spec_indices:
+                    doc.close()
+                    return {
+                        "error": f"Invalid page specification: '{page_spec}'. Must be a valid 1-based page number or range (1 to {doc.page_count})."
                     }
             else:
                 spec_indices = _parse_page_spec_pymupdf(page_spec, doc)
@@ -479,6 +549,9 @@ def extract_pdf_pages(
                         if zero_based:
                             # For zero-based mode, use the 0-based index
                             index_to_spec[idx] = str(idx)
+                        elif one_based:
+                            # For one-based mode, use the 1-based page number
+                            index_to_spec[idx] = str(idx + 1)
                         else:
                             # Get the actual label for this page
                             labels = doc.get_page_labels()  # type: ignore[attr-defined]
@@ -657,12 +730,17 @@ def extract_pdf_pages(
         "Returns a mapping of page indices (0-based) to their labels.\n"
         "This is useful for understanding what page labels are available before extracting.\n\n"
         "Args:\n"
-        "  file (str): Path to PDF file. Required.\n\n"
+        "  file (str): Path to PDF file. Required.\n"
+        "  start (int, optional): Start index (0-based) for slicing results. Default: 0.\n"
+        "  limit (int, optional): Maximum number of labels to return. Default: all pages.\n\n"
         "Returns: { page_count: number, page_labels: object } or { error: string }\n"
-        "  where page_labels is a mapping like: {'0': 'i', '1': 'ii', '2': 'iii', '3': '1', ...}"
+        "  where page_labels is a mapping like: {'0': 'i', '1': 'ii', '2': 'iii', '3': '1', ...}\n"
+        "  The page_labels object will only contain entries for the requested range."
     )
 )
-def get_pdf_page_labels(file: str) -> dict[str, Any]:
+def get_pdf_page_labels(
+    file: str, start: int | None = None, limit: int | None = None
+) -> dict[str, Any]:
     """Get all page labels from a PDF file."""
     if not file:
         return {"error": "'file' argument is required"}
@@ -678,6 +756,12 @@ def get_pdf_page_labels(file: str) -> dict[str, Any]:
     if not pdf_path.exists():
         return {"error": f"PDF file not found: {file}"}
 
+    # Validate start and limit
+    if start is not None and start < 0:
+        return {"error": "start must be non-negative"}
+    if limit is not None and limit <= 0:
+        return {"error": "limit must be positive"}
+
     try:
         # Open PDF with PyMuPDF
         doc: fitz.Document = fitz.open(pdf_path)
@@ -685,9 +769,15 @@ def get_pdf_page_labels(file: str) -> dict[str, Any]:
         # Get page count
         page_count = doc.page_count
 
-        # Build page label mapping
+        # Determine range to process
+        start_idx = start if start is not None else 0
+        end_idx = page_count
+        if limit is not None:
+            end_idx = min(start_idx + limit, page_count)
+
+        # Build page label mapping for the requested range
         page_label_map = {}
-        for i in range(page_count):
+        for i in range(start_idx, end_idx):
             page = doc[i]
             label = page.get_label()
             page_label_map[str(i)] = label
@@ -1166,8 +1256,9 @@ def fuzzy_search_content(
         "  file_types (str, optional): Comma-separated file types (pdf,docx,epub).\n"
         "  preview (bool, optional): Include preview context. Default: true.\n"
         "  limit (int, optional): Max results. Default: 20.\n\n"
-        "Returns: { matches: Array<{file, content, match_text, page?, page_label?}> }\n"
+        "Returns: { matches: Array<{file, content, match_text, page?, page_index_0based?, page_label?}> }\n"
         "  - page: Physical page number (1-based) for PDF files\n"
+        "  - page_index_0based: Zero-based page index for programmatic access (page - 1)\n"
         "  - page_label: Page label/alias as shown in PDF readers (e.g., 'v', 'ToC')"
     )
 )
@@ -1327,7 +1418,12 @@ def fuzzy_search_documents(
 
                     # Add page information if available
                     if page_number is not None:
-                        result_data["page"] = page_number
+                        result_data["page"] = (
+                            page_number  # 1-based page number from ripgrep-all
+                        )
+                        result_data["page_index_0based"] = (
+                            page_number - 1
+                        )  # 0-based index for programmatic access
                         if page_label:
                             result_data["page_label"] = page_label
 
@@ -1518,15 +1614,29 @@ def _cli() -> None:
         "--fuzzy-hint",
         help="Fuzzy search to filter extracted pages by content",
     )
-    p_pdf.add_argument(
+
+    # Create a mutually exclusive group for indexing options
+    index_group = p_pdf.add_mutually_exclusive_group()
+    index_group.add_argument(
         "--zero-based",
         action="store_true",
         help="Interpret page numbers as 0-based indices (e.g., 0 = first page)",
+    )
+    index_group.add_argument(
+        "--one-based",
+        action="store_true",
+        help="Interpret page numbers as 1-based indices (e.g., 1 = first page)",
     )
 
     # page-labels command
     p_labels = sub.add_parser("page-labels", help="Get all page labels from PDF")
     p_labels.add_argument("file", help="PDF file path")
+    p_labels.add_argument(
+        "--start", type=int, default=None, help="Start index (0-based)"
+    )
+    p_labels.add_argument(
+        "--limit", type=int, default=None, help="Maximum number of labels to return"
+    )
 
     # page-count command
     p_count = sub.add_parser("page-count", help="Get total page count from PDF")
@@ -1570,9 +1680,10 @@ def _cli() -> None:
             ns.clean_html,
             getattr(ns, "fuzzy_hint", None),
             getattr(ns, "zero_based", False),
+            getattr(ns, "one_based", False),
         )
     elif ns.cmd == "page-labels":
-        res = get_pdf_page_labels(ns.file)
+        res = get_pdf_page_labels(ns.file, ns.start, ns.limit)
     elif ns.cmd == "page-count":
         res = get_pdf_page_count(ns.file)
     else:
