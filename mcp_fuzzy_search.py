@@ -116,6 +116,7 @@ FUZZY_SEARCH_FILES_TOOL = "fuzzy_search_files"
 FUZZY_SEARCH_CONTENT_TOOL = "fuzzy_search_content"
 FUZZY_SEARCH_DOCUMENTS_TOOL = "fuzzy_search_documents"
 EXTRACT_PDF_PAGES_TOOL = "extract_pdf_pages"
+GET_PDF_OUTLINE_TOOL = "get_pdf_outline"
 
 # Default parameters
 DEFAULT_PATH = "."
@@ -833,6 +834,215 @@ def get_pdf_page_count(file: str) -> dict[str, Any]:
 
     except Exception as e:
         return {"error": f"Failed to get page count: {str(e)}"}
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_pdf_outline
+# ---------------------------------------------------------------------------
+@mcp.tool(
+    description=(
+        "Get the table of contents (outline) from a PDF file.\n\n"
+        "Extracts the hierarchical outline/bookmarks from a PDF, with optional fuzzy filtering.\n\n"
+        "Args:\n"
+        "  file (str): Path to PDF file. Required.\n"
+        "  simple (bool, optional): Control output format. Default: true.\n"
+        "  max_depth (int, optional): Maximum depth to traverse. Default: unlimited.\n"
+        "  fuzzy_filter (str, optional): Fuzzy search to filter outline entries by title.\n\n"
+        "Returns: { outline: Array, total_entries: number, max_depth_found: number, filtered_count?: number } or { error: string }\n\n"
+        "Outline format (simple=true):\n"
+        "  Each entry: [level, title, page, page_label]\n"
+        "  - level: Hierarchy level (1-based)\n"
+        "  - title: Outline entry title\n"
+        "  - page: Page number (1-based)\n"
+        "  - page_label: Page label as shown in PDF readers\n\n"
+        "Outline format (simple=false):\n"
+        "  Each entry: [level, title, page, page_label, link]\n"
+        "  - link: Detailed link information dictionary\n\n"
+        "Example:\n"
+        "  Simple outline: [[1, 'Introduction', 1, 'i'], [1, 'Chapter 1', 5, '1'], [2, 'Section 1.1', 6, '2']]"
+    )
+)
+def get_pdf_outline(
+    file: str,
+    simple: bool = True,
+    max_depth: int | None = None,
+    fuzzy_filter: str | None = None,
+) -> dict[str, Any]:
+    """Get the table of contents (outline) from a PDF file."""
+    if not file:
+        return {"error": "'file' argument is required"}
+
+    # Check if PyMuPDF is available
+    if not PYMUPDF_AVAILABLE:
+        return {
+            "error": "PyMuPDF is not installed. Install it with: pip install PyMuPDF"
+        }
+
+    # Check if file exists
+    pdf_path = Path(file)
+    if not pdf_path.exists():
+        return {"error": f"PDF file not found: {file}"}
+
+    try:
+        # Open PDF with PyMuPDF
+        doc: fitz.Document = fitz.open(pdf_path)
+
+        # Get outline
+        outline = doc.outline
+        if not outline:
+            doc.close()
+            return {
+                "outline": [],
+                "total_entries": 0,
+                "max_depth_found": 0,
+            }
+
+        # Build the outline list recursively
+        outline_list = []
+        max_depth_found = 0
+
+        def recurse_outline(ol_item, level):
+            nonlocal max_depth_found
+            while ol_item:
+                # Skip if max_depth is set and we've exceeded it
+                if max_depth is not None and level > max_depth:
+                    if hasattr(ol_item, 'next'):
+                        ol_item = ol_item.next
+                    else:
+                        break
+                    continue
+
+                # Update max depth found
+                if level > max_depth_found:
+                    max_depth_found = level
+
+                # Get title
+                title = ""
+                if hasattr(ol_item, 'title') and ol_item.title:
+                    title = ol_item.title
+
+                # Get page number (1-based)
+                is_external = hasattr(ol_item, 'is_external') and ol_item.is_external
+                if not is_external:
+                    uri = getattr(ol_item, 'uri', None)
+                    page_num = getattr(ol_item, 'page', -1)
+                    if uri:
+                        if page_num == -1:
+                            # Resolve the link to get the page
+                            try:
+                                resolve = doc.resolve_link(uri)
+                                page = resolve[0] + 1 if resolve else -1
+                            except:
+                                page = -1
+                        else:
+                            page = page_num + 1
+                    else:
+                        page = page_num + 1 if page_num >= 0 else -1
+                else:
+                    page = -1
+
+                # Get page label
+                page_label = ""
+                if page > 0:
+                    try:
+                        page_idx = page - 1
+                        page_obj = doc[page_idx]
+                        page_label = page_obj.get_label()
+                    except:
+                        page_label = str(page)
+
+                # Build entry
+                if simple:
+                    entry = [level, title, page, page_label]
+                else:
+                    # Get detailed link information
+                    link = {
+                        "page": page,
+                        "uri": getattr(ol_item, 'uri', None),
+                        "is_external": is_external,
+                        "is_open": getattr(ol_item, 'is_open', False),
+                    }
+                    if hasattr(ol_item, 'dest') and ol_item.dest:
+                        dest_info = {}
+                        if hasattr(ol_item.dest, 'kind'):
+                            dest_info["kind"] = ol_item.dest.kind
+                        if hasattr(ol_item.dest, 'page'):
+                            dest_info["page"] = ol_item.dest.page
+                        if hasattr(ol_item.dest, 'uri'):
+                            dest_info["uri"] = ol_item.dest.uri
+                        if hasattr(ol_item.dest, 'lt') and ol_item.dest.lt:
+                            dest_info["lt"] = list(ol_item.dest.lt)
+                        if hasattr(ol_item.dest, 'rb') and ol_item.dest.rb:
+                            dest_info["rb"] = list(ol_item.dest.rb)
+                        if hasattr(ol_item.dest, 'zoom'):
+                            dest_info["zoom"] = ol_item.dest.zoom
+                        link["dest"] = dest_info
+                    entry = [level, title, page, page_label, link]
+
+                outline_list.append(entry)
+
+                # Recurse into children
+                if hasattr(ol_item, 'down') and ol_item.down:
+                    recurse_outline(ol_item.down, level + 1)
+
+                # Move to next sibling
+                if hasattr(ol_item, 'next'):
+                    ol_item = ol_item.next
+                else:
+                    break
+
+        # Start recursion
+        recurse_outline(outline, 1)
+
+        # Close document
+        doc.close()
+
+        # Apply fuzzy filtering if requested
+        if fuzzy_filter and FZF_EXECUTABLE:
+            # Build input for fzf from titles
+            fzf_input = []
+            for i, entry in enumerate(outline_list):
+                # Format: index:title (we'll use index to map back)
+                fzf_input.append(f"{i}:{entry[1]}")
+
+            # Run fzf
+            fzf_cmd = [FZF_EXECUTABLE, "--filter", fuzzy_filter]
+            fzf_proc = subprocess.run(
+                fzf_cmd,
+                input="\n".join(fzf_input),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            # Parse filtered results
+            filtered_outline = []
+            if fzf_proc.returncode == 0 and fzf_proc.stdout:
+                for line in fzf_proc.stdout.strip().split("\n"):
+                    if line:
+                        try:
+                            idx = int(line.split(":", 1)[0])
+                            filtered_outline.append(outline_list[idx])
+                        except (ValueError, IndexError):
+                            continue
+
+            # Return filtered results
+            return {
+                "outline": filtered_outline,
+                "total_entries": len(outline_list),
+                "max_depth_found": max_depth_found,
+                "filtered_count": len(filtered_outline),
+            }
+        else:
+            # Return unfiltered results
+            return {
+                "outline": outline_list,
+                "total_entries": len(outline_list),
+                "max_depth_found": max_depth_found,
+            }
+
+    except Exception as e:
+        return {"error": f"Failed to get outline: {str(e)}"}
 
 
 # ---------------------------------------------------------------------------
@@ -1809,6 +2019,22 @@ def _cli() -> None:
     p_count = sub.add_parser("page-count", help="Get total page count from PDF")
     p_count.add_argument("file", help="PDF file path")
 
+    # pdf-outline command
+    p_outline = sub.add_parser("pdf-outline", help="Get PDF outline/table of contents")
+    p_outline.add_argument("file", help="PDF file path")
+    p_outline.add_argument(
+        "--no-simple",
+        dest="simple",
+        action="store_false",
+        help="Include detailed link information",
+    )
+    p_outline.add_argument(
+        "--max-depth", type=int, default=None, help="Maximum depth to traverse"
+    )
+    p_outline.add_argument(
+        "--fuzzy-filter", help="Fuzzy search to filter outline entries by title"
+    )
+
     ns = parser.parse_args()
 
     if ns.examples:
@@ -1853,6 +2079,13 @@ def _cli() -> None:
         res = get_pdf_page_labels(ns.file, ns.start, ns.limit)
     elif ns.cmd == "page-count":
         res = get_pdf_page_count(ns.file)
+    elif ns.cmd == "pdf-outline":
+        res = get_pdf_outline(
+            ns.file,
+            ns.simple,
+            ns.max_depth,
+            getattr(ns, "fuzzy_filter", None),
+        )
     else:
         parser.error(f"Unknown command: {ns.cmd}")
 
