@@ -1011,9 +1011,15 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
 
         # On Windows, the code uses subprocess.run instead of Popen
         # We need to mock both for the test to work correctly
-        mock_run = MagicMock()
-        mock_run.returncode = 0
-        mock_run.stdout = mock_rga_output
+        mock_run_rga = MagicMock()
+        mock_run_rga.returncode = 0
+        mock_run_rga.stdout = mock_rga_output
+        mock_run_rga.stderr = ""
+
+        mock_run_fzf = MagicMock()
+        mock_run_fzf.returncode = 0
+        mock_run_fzf.stdout = f"{test_pdf}:0:Page 1: This is test content"
+        mock_run_fzf.stderr = None
 
         # Configure mocks
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
@@ -1029,7 +1035,7 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
             mock_doc.close.return_value = None
 
             with patch("fitz.open", return_value=mock_doc):
-                with patch("subprocess.run", side_effect=[mock_run, mock_run]):
+                with patch("subprocess.run", side_effect=[mock_run_rga, mock_run_fzf]):
                     async with client_session(
                         mcp_fuzzy_search.mcp._mcp_server
                     ) as client:
