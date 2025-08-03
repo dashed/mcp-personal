@@ -984,12 +984,16 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
     test_pdf.write_bytes(pdf_content)
 
     # Mock the rga JSON output with Page prefix
+    # Use json.dumps to properly escape the path for JSON
+    import json
+
+    escaped_path = json.dumps(str(test_pdf))[1:-1]  # Remove quotes
     mock_rga_output = (
         '''{"type":"match","data":{"path":{"text":"'''
-        + str(test_pdf)
+        + escaped_path
         + '''"},"lines":{"text":"Page 1: This is test content"},"line_number":null,"absolute_offset":100,"submatches":[{"match":{"text":"test"},"start":8,"end":12}]}}
 {"type":"end","data":{"path":{"text":"'''
-        + str(test_pdf)
+        + escaped_path
         + """"},"binary_offset":null,"stats":{"elapsed":{"secs":0,"nanos":35222125,"human":"0.035222s"},"searches":1,"searches_with_match":1,"bytes_searched":1000,"bytes_printed":100,"matched_lines":1,"matches":1}}}"""
     )
 
@@ -1108,10 +1112,14 @@ async def test_fuzzy_search_documents_with_page_labels(tmp_path: Path):
     test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
 
     # Mock rga output with multiple pages
+    # Use json.dumps to properly escape the path for JSON
+    import json
+
+    escaped_path = json.dumps(str(test_pdf))[1:-1]  # Remove quotes
     mock_rga_output = [
-        f'{{"type":"match","data":{{"path":{{"text":"{test_pdf}"}},"lines":{{"text":"Page 1: Introduction to concepts"}},"line_number":null,"absolute_offset":100,"submatches":[{{"match":{{"text":"concepts"}},"start":25,"end":33}}]}}}}',
-        f'{{"type":"match","data":{{"path":{{"text":"{test_pdf}"}},"lines":{{"text":"Page 5: Chapter 1 begins"}},"line_number":null,"absolute_offset":500,"submatches":[{{"match":{{"text":"Chapter"}},"start":8,"end":15}}]}}}}',
-        f'{{"type":"match","data":{{"path":{{"text":"{test_pdf}"}},"lines":{{"text":"Page 10: Table of contents"}},"line_number":null,"absolute_offset":1000,"submatches":[{{"match":{{"text":"contents"}},"start":18,"end":26}}]}}}}',
+        f'{{"type":"match","data":{{"path":{{"text":"{escaped_path}"}},"lines":{{"text":"Page 1: Introduction to concepts"}},"line_number":null,"absolute_offset":100,"submatches":[{{"match":{{"text":"concepts"}},"start":25,"end":33}}]}}}}',
+        f'{{"type":"match","data":{{"path":{{"text":"{escaped_path}"}},"lines":{{"text":"Page 5: Chapter 1 begins"}},"line_number":null,"absolute_offset":500,"submatches":[{{"match":{{"text":"Chapter"}},"start":8,"end":15}}]}}}}',
+        f'{{"type":"match","data":{{"path":{{"text":"{escaped_path}"}},"lines":{{"text":"Page 10: Table of contents"}},"line_number":null,"absolute_offset":1000,"submatches":[{{"match":{{"text":"contents"}},"start":18,"end":26}}]}}}}',
     ]
 
     with patch("subprocess.Popen") as mock_popen:
