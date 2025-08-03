@@ -360,7 +360,7 @@ async def test_list_tools():
     async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
         result = await client.list_tools()
 
-        assert len(result.tools) == 6
+        assert len(result.tools) == 7
 
         # Find tools by name
         files_tool = next(t for t in result.tools if t.name == "fuzzy_search_files")
@@ -371,10 +371,17 @@ async def test_list_tools():
         pdf_tool = next(t for t in result.tools if t.name == "extract_pdf_pages")
         labels_tool = next(t for t in result.tools if t.name == "get_pdf_page_labels")
         count_tool = next(t for t in result.tools if t.name == "get_pdf_page_count")
+        outline_tool = next(t for t in result.tools if t.name == "get_pdf_outline")
 
         # Verify metadata for original tools
         assert files_tool.description and "fuzzy matching" in files_tool.description
         assert "fuzzy_filter" in files_tool.inputSchema["required"]
+
+        # Verify outline tool
+        assert (
+            outline_tool.description and "table of contents" in outline_tool.description
+        )
+        assert "file" in outline_tool.inputSchema["required"]
 
         assert (
             content_tool.description
