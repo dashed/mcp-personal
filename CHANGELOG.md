@@ -8,6 +8,13 @@
   - Added `_parse_page_spec_pymupdf()` function using PyMuPDF's `get_page_numbers()` API
   - Support for single labels, ranges, and mixed specifications
   - Direct page label extraction via PyMuPDF's page.get_label() method
+- **Zero-based Page Indexing**: Added `zero_based` flag to `extract-pdf` tool for direct 0-based page index access
+  - When enabled, all page numbers are interpreted as 0-based indices (0 = first page)
+  - Useful for programmatic access when page labels are not needed
+  - Available in both CLI (`--zero-based`) and MCP tool interface
+- **Page Labels in Document Search**: Enhanced `fuzzy_search_documents` to return page labels for PDF search results
+  - Returns actual PDF page labels (e.g., "vii", "ToC", "1") alongside page numbers
+  - Builds page index to label mapping using PyMuPDF for accurate label extraction
 - **HTML Stripping**: Added `clean_html` parameter (default: true) to strip HTML styling tags from PDF extraction output
   - Uses pandoc with disabled extensions (`-native_divs`, `-native_spans`, `-raw_html`) for clean markdown output
 - **Fuzzy Search Filtering**: Added optional `fuzzy_hint` parameter to `extract_pdf_pages` for content-based page filtering
@@ -26,6 +33,10 @@
   - Simplified implementation with PyMuPDF's high-level APIs
   - Updated all PDF-related tests to mock PyMuPDF instead of subprocess/pdfminer
 - **Type Checking**: Replaced pyright with ty in Makefile for faster type checking
+- **Document Search Output**: Removed "Page N: " prefix from content field in `fuzzy_search_documents` results
+  - Content now shows just the text without the page prefix (e.g., "topology." instead of "Page 542: topology.")
+  - Page number is still available in the separate `page` field
+  - Makes the content cleaner and more suitable for display
 
 ### Fixed
 - **PDF Extraction HTML Output**: Fixed issue where PDF extraction was outputting HTML styling tags like `<span style="font-family: TimesLTPro-Roman; font-size:9px">`

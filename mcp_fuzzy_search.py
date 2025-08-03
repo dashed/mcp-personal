@@ -182,6 +182,51 @@ def _int_to_roman(num: int) -> str:
     return roman_num
 
 
+def _parse_page_spec_zero_based(page_spec: str, doc) -> list[int]:
+    """Parse a page specification as 0-based indices directly.
+
+    Handles:
+    - Single indices: "0", "14", "266"
+    - Ranges: "0-4", "266-273"
+
+    Args:
+        page_spec: Page specification string (0-based indices)
+        doc: PyMuPDF document object
+
+    Returns:
+        List of 0-based page indices
+    """
+    indices = []
+
+    # Handle range
+    if "-" in page_spec:
+        parts = page_spec.split("-", 1)
+        try:
+            start = int(parts[0].strip())
+            end = int(parts[1].strip())
+
+            # Validate range
+            if start < 0 or end >= doc.page_count:
+                return []
+            if start > end:
+                return []
+
+            # Add all indices in range (inclusive)
+            indices.extend(range(start, end + 1))
+        except ValueError:
+            return []
+    else:
+        # Single index
+        try:
+            idx = int(page_spec.strip())
+            if 0 <= idx < doc.page_count:
+                indices.append(idx)
+        except ValueError:
+            return []
+
+    return indices
+
+
 def _parse_page_spec_pymupdf(page_spec: str, doc) -> list[int]:
     """Parse a page specification into 0-based page indices using PyMuPDF.
 
@@ -350,18 +395,25 @@ def _filter_pages_fuzzy(
         "  format (str, optional): Output format (markdown,html,plain). Default: markdown.\n"
         "  preserve_layout (bool, optional): Try to preserve layout. Default: false.\n"
         "  clean_html (bool, optional): Strip HTML styling tags. Default: true.\n"
-        "  fuzzy_hint (str, optional): Fuzzy search to filter extracted pages by content.\n\n"
-        "Page specifications:\n"
+        "  fuzzy_hint (str, optional): Fuzzy search to filter extracted pages by content.\n"
+        "  zero_based (bool, optional): Interpret page numbers as 0-based indices. Default: false.\n\n"
+        "Page specifications (when zero_based=false):\n"
         "  - Page labels: 'v', 'vii', 'ToC', 'Introduction' (as shown in PDF readers)\n"
         "  - Ranges: 'v-vii', '1-5'\n"
         "  - Physical pages: '1', '14' (1-based if not found as label)\n"
         "  - Mixed: 'v,vii,1,5-8,ToC'\n\n"
+        "Page specifications (when zero_based=true):\n"
+        "  - Direct indices: '0', '14', '266' (0-based page indices)\n"
+        "  - Ranges: '0-4' (pages 1-5), '266-273' (pages 267-274)\n"
+        "  - Mixed: '0,1,266,573'\n\n"
         "Examples:\n"
         "  Extract roman numeral pages: pages='v,vi,vii'\n"
         "  Extract range: pages='v-vii'\n"
         "  Extract by page number: pages='14'\n"
         "  Extract mixed: pages='ToC,v-vii,1,2'\n"
-        "  Extract with fuzzy filter: pages='1-50', fuzzy_hint='neural network'\n\n"
+        "  Extract with fuzzy filter: pages='1-50', fuzzy_hint='neural network'\n"
+        "  Extract with 0-based indices: pages='0,1,2', zero_based=true (gets pages 1,2,3)\n"
+        "  Extract pages 267-274: pages='266-273', zero_based=true\n\n"
         "Returns: { content: string, pages_extracted: number[], page_labels: string[], format: string } or { error: string }"
     )
 )
@@ -372,6 +424,7 @@ def extract_pdf_pages(
     preserve_layout: bool = False,
     clean_html: bool = True,
     fuzzy_hint: str | None = None,
+    zero_based: bool = False,
 ) -> dict[str, Any]:
     """Extract specific pages from PDF using PyMuPDF."""
     if not file or not pages:
@@ -401,25 +454,38 @@ def extract_pdf_pages(
             if not page_spec:
                 continue
 
-            spec_indices = _parse_page_spec_pymupdf(page_spec, doc)
-            if not spec_indices:
-                doc.close()
-                return {
-                    "error": f"Invalid page specification: '{page_spec}'. Not found as page label or valid page number."
-                }
+            # Use appropriate parsing function based on zero_based flag
+            if zero_based:
+                spec_indices = _parse_page_spec_zero_based(page_spec, doc)
+                if not spec_indices:
+                    doc.close()
+                    return {
+                        "error": f"Invalid page specification: '{page_spec}'. Must be a valid 0-based index or range (0 to {doc.page_count - 1})."
+                    }
+            else:
+                spec_indices = _parse_page_spec_pymupdf(page_spec, doc)
+                if not spec_indices:
+                    doc.close()
+                    return {
+                        "error": f"Invalid page specification: '{page_spec}'. Not found as page label or valid page number."
+                    }
 
             # Map each index to its original specification
             # For ranges, map each index to its individual page number/label
             if "-" in page_spec and len(spec_indices) > 1:
-                # This is a range - map each page to its actual label
+                # This is a range - map each page to its actual label or index
                 for idx in spec_indices:
                     if idx not in index_to_spec:  # Only map first occurrence
-                        # Get the actual label for this page
-                        labels = doc.get_page_labels()  # type: ignore[attr-defined]
-                        if labels and idx < len(labels):
-                            index_to_spec[idx] = labels[idx]
+                        if zero_based:
+                            # For zero-based mode, use the 0-based index
+                            index_to_spec[idx] = str(idx)
                         else:
-                            index_to_spec[idx] = str(idx + 1)
+                            # Get the actual label for this page
+                            labels = doc.get_page_labels()  # type: ignore[attr-defined]
+                            if labels and idx < len(labels):
+                                index_to_spec[idx] = labels[idx]
+                            else:
+                                index_to_spec[idx] = str(idx + 1)
             else:
                 # Single page specification
                 for idx in spec_indices:
@@ -1100,7 +1166,9 @@ def fuzzy_search_content(
         "  file_types (str, optional): Comma-separated file types (pdf,docx,epub).\n"
         "  preview (bool, optional): Include preview context. Default: true.\n"
         "  limit (int, optional): Max results. Default: 20.\n\n"
-        "Returns: { matches: Array<{file, page, content, match_text}> } or { error: string }"
+        "Returns: { matches: Array<{file, content, match_text, page?, page_label?}> }\n"
+        "  - page: Physical page number (1-based) for PDF files\n"
+        "  - page_label: Page label/alias as shown in PDF readers (e.g., 'v', 'ToC')"
     )
 )
 def fuzzy_search_documents(
@@ -1127,14 +1195,37 @@ def fuzzy_search_documents(
 
         # Add file type filters if specified
         if file_types:
+            # Map common file types to rga adapters
+            adapter_map = {
+                "pdf": "poppler",
+                "docx": "pandoc",
+                "doc": "pandoc",
+                "epub": "pandoc",
+                "zip": "zip",
+                "tar": "tar",
+                "sqlite": "sqlite",
+                "db": "sqlite",
+            }
+            adapters = []
             for ft in file_types.split(","):
-                rga_cmd.extend(["--rga-adapters", f"+{ft.strip()}"])
+                ft_clean = ft.strip().lower()
+                adapter = adapter_map.get(ft_clean, ft_clean)
+                adapters.append(adapter)
+
+            # Join adapters with comma and add as single argument with equals sign
+            adapter_string = "+" + ",".join(adapters)
+            rga_cmd.append(f"--rga-adapters={adapter_string}")
 
         # Search pattern and path
         search_path = str(Path(path).resolve())
-        rga_cmd.extend([".", search_path])  # "." searches all content
+        # Use the fuzzy filter as the initial search pattern for rga
+        # This will be further refined by fzf
+        rga_cmd.extend([fuzzy_filter, search_path])
 
-        # Run rga and collect JSON output
+        # Debug: Log the command
+        logger.debug(f"Running rga command: {' '.join(rga_cmd)}")
+
+        # Run rga and collect JSON output with better subprocess handling
         rga_proc = subprocess.Popen(
             rga_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
@@ -1143,47 +1234,109 @@ def fuzzy_search_documents(
         formatted_lines = []
         line_to_data = {}  # Map formatted line to original data
 
-        if rga_proc.stdout:
-            for line in rga_proc.stdout:
-                if not line.strip():
-                    continue
+        # Cache for PDF page labels to avoid re-opening files
+        pdf_page_labels_cache = {}
 
-                try:
-                    data = json.loads(line)
-                    if data.get("type") == "match":
-                        match_data = data.get("data", {})
-                        file_path = match_data.get("path", {}).get("text", "")
-                        line_num = match_data.get("line_number") or 0
+        # Read all stdout first to avoid broken pipe
+        stdout_data = ""
+        stderr_data = ""
+        try:
+            # Use communicate to properly handle large outputs
+            result = rga_proc.communicate()
+            if result:
+                stdout_data = result[0] if result[0] else ""
+                stderr_data = result[1] if len(result) > 1 and result[1] else ""
+        except Exception as e:
+            logger.warning(f"Error communicating with rga: {e}")
 
-                        # Extract text from lines
-                        lines = match_data.get("lines", {})
-                        text = lines.get("text", "")
+        # Log any stderr output
+        if stderr_data:
+            # Filter out broken pipe errors which are expected with large outputs
+            if "broken pipe" not in stderr_data.lower():
+                logger.debug(f"rga stderr: {stderr_data}")
 
-                        # Extract matched text from submatches
-                        submatches = match_data.get("submatches", [])
-                        match_text = (
-                            submatches[0]["match"]["text"] if submatches else text
-                        )
+        # Process the stdout data
+        for line in stdout_data.splitlines():
+            if not line.strip():
+                continue
 
-                        # Build formatted line for fzf
-                        formatted = f"{file_path}:{line_num}:{text}"
-                        formatted_lines.append(formatted)
+            try:
+                data = json.loads(line)
+                if data.get("type") == "match":
+                    match_data = data.get("data", {})
+                    file_path = match_data.get("path", {}).get("text", "")
+                    line_num = match_data.get("line_number") or 0
 
-                        # Store mapping for later reconstruction
-                        line_to_data[formatted] = {
-                            "file": file_path,
-                            "line": line_num,
-                            "content": text,
-                            "match_text": match_text,
-                            "page": (line_num or 0)
-                            + 1,  # For PDFs, convert to 1-based page number
-                        }
-                except json.JSONDecodeError:
-                    continue
+                    # Extract text from lines
+                    lines = match_data.get("lines", {})
+                    text = lines.get("text", "")
+                    # Strip newlines to ensure consistent formatting
+                    text = text.strip()
 
-        rga_proc.wait()
+                    # Extract matched text from submatches
+                    submatches = match_data.get("submatches", [])
+                    match_text = submatches[0]["match"]["text"] if submatches else text
+
+                    # Parse page number from "Page N: " prefix if present
+                    page_number = None
+                    page_label = None
+                    content = text  # Default to full text
+                    if text.startswith("Page ") and ": " in text:
+                        try:
+                            parts = text.split(": ", 1)
+                            page_prefix = parts[0]
+                            page_number = int(page_prefix.replace("Page ", ""))
+                            # Strip the "Page N: " prefix from content
+                            content = parts[1] if len(parts) > 1 else text
+
+                            # For PDF files, get page label
+                            if file_path.lower().endswith(".pdf") and PYMUPDF_AVAILABLE:
+                                # Get page labels from cache or load them
+                                if file_path not in pdf_page_labels_cache:
+                                    try:
+                                        doc = fitz.open(file_path)
+                                        # Build mapping from page index to actual label
+                                        label_map = {}
+                                        for i in range(doc.page_count):
+                                            page = doc[i]
+                                            label_map[i] = page.get_label()
+                                        pdf_page_labels_cache[file_path] = label_map
+                                        doc.close()
+                                    except Exception:
+                                        pdf_page_labels_cache[file_path] = {}
+
+                                label_map = pdf_page_labels_cache[file_path]
+                                # Page numbers from pdftotext are 1-based, convert to 0-based for index
+                                page_idx = page_number - 1
+                                if page_idx in label_map:
+                                    page_label = label_map[page_idx]
+                        except (ValueError, IndexError):
+                            pass
+
+                    # Build formatted line for fzf
+                    formatted = f"{file_path}:{line_num}:{text}"
+                    formatted_lines.append(formatted)
+
+                    # Store mapping for later reconstruction
+                    result_data = {
+                        "file": file_path,
+                        "line": line_num,
+                        "content": content,
+                        "match_text": match_text,
+                    }
+
+                    # Add page information if available
+                    if page_number is not None:
+                        result_data["page"] = page_number
+                        if page_label:
+                            result_data["page_label"] = page_label
+
+                    line_to_data[formatted] = result_data
+            except json.JSONDecodeError:
+                continue
 
         if not formatted_lines:
+            logger.debug(f"No formatted lines from rga for path: {search_path}")
             return {"matches": []}
 
         # Feed to fzf for fuzzy filtering
@@ -1365,6 +1518,11 @@ def _cli() -> None:
         "--fuzzy-hint",
         help="Fuzzy search to filter extracted pages by content",
     )
+    p_pdf.add_argument(
+        "--zero-based",
+        action="store_true",
+        help="Interpret page numbers as 0-based indices (e.g., 0 = first page)",
+    )
 
     # page-labels command
     p_labels = sub.add_parser("page-labels", help="Get all page labels from PDF")
@@ -1411,6 +1569,7 @@ def _cli() -> None:
             ns.preserve_layout,
             ns.clean_html,
             getattr(ns, "fuzzy_hint", None),
+            getattr(ns, "zero_based", False),
         )
     elif ns.cmd == "page-labels":
         res = get_pdf_page_labels(ns.file)

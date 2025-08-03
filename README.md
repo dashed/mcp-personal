@@ -22,7 +22,8 @@ Advanced search with both file name and content capabilities using `ripgrep` and
   - `fuzzy_search_files`: Search file NAMES/paths
   - `fuzzy_search_content`: Search file CONTENTS with path+content matching by default
 - **PDF and document search** (optional) - search through PDFs, Office docs, and archives using `ripgrep-all`
-- **PDF page extraction** (optional) - extract specific pages from PDFs as markdown using `pdf2txt.py` + `pandoc`
+- **PDF page extraction** (optional) - extract specific pages from PDFs using PyMuPDF with page label support
+- **PDF information tools** (optional) - get page labels and page count from PDF files
 - **Simplified interface** - just provide fuzzy search terms (NO regex support)
 - **Multiline record processing** for complex pattern matching
 - **Standalone CLI** for testing and direct usage
@@ -81,7 +82,7 @@ brew install ripgrep fzf
 
 # For PDF search capabilities (optional)
 brew install ripgrep-all pandoc
-uv tool install pdfminer.six
+pip install PyMuPDF  # Or: uv pip install PyMuPDF
 ```
 
 #### Ubuntu/Debian
@@ -92,8 +93,8 @@ sudo apt install ripgrep fzf
 # Install ripgrep-all
 cargo install ripgrep-all  # Requires Rust/cargo
 
-# Install pdfminer.six
-uv tool install pdfminer.six
+# Install PyMuPDF
+pip install PyMuPDF  # Or: uv pip install PyMuPDF
 
 # Install pandoc
 sudo apt install pandoc
@@ -369,10 +370,17 @@ The fuzzy search server also works as a standalone CLI tool:
 ./mcp_fuzzy_search.py search-documents "invoice total" invoices/ --file-types "pdf"  # PDFs only
 ./mcp_fuzzy_search.py search-documents "contract" . --file-types "pdf,docx" --limit 5
 
-# Extract specific pages from PDFs (requires optional binaries)
+# Extract specific pages from PDFs (using PyMuPDF)
 ./mcp_fuzzy_search.py extract-pdf manual.pdf "1,3,5-7"  # Extract pages 1, 3, 5, 6, 7
+./mcp_fuzzy_search.py extract-pdf report.pdf "v-vii,1,ToC"  # Use page labels
 ./mcp_fuzzy_search.py extract-pdf report.pdf "10-20" --format html  # Extract as HTML
 ./mcp_fuzzy_search.py extract-pdf thesis.pdf "100-105" --preserve-layout  # Keep layout
+./mcp_fuzzy_search.py extract-pdf book.pdf "1-50" --fuzzy-hint "neural network"  # Filter by content
+./mcp_fuzzy_search.py extract-pdf book.pdf "0,266-273" --zero-based  # 0-based indices (pages 1, 267-274)
+
+# Get PDF information
+./mcp_fuzzy_search.py get-pdf-page-labels manual.pdf  # List all page labels
+./mcp_fuzzy_search.py get-pdf-page-count manual.pdf  # Get total page count
 ```
 
 ### SQLite Server
@@ -801,23 +809,114 @@ Search through PDFs and other document formats using ripgrep-all (requires optio
 }
 ```
 
-#### `extract_pdf_pages`
-Extract specific pages from a PDF and convert to various formats (requires optional binaries).
+**Returns:**
+```python
+{
+  "matches": [
+    {
+      "file": "/path/to/document.pdf",
+      "line": 0,
+      "content": "topology.",  # Content without "Page N: " prefix
+      "match_text": "topology",
+      "page": 542,  # 1-based page number (from ripgrep-all)
+      "page_label": "19"  # Actual PDF page label (only for PDFs with PyMuPDF)
+    }
+  ]
+}
+```
 
-**Purpose:** Extract individual pages or page ranges from PDFs and convert them to readable formats like markdown.
+**Note:** For PDF files, the tool returns page labels as they appear in PDF readers (e.g., "vii", "ToC", "1"). The content field no longer includes the "Page N: " prefix for cleaner output.
+
+#### `extract_pdf_pages`
+Extract specific pages from a PDF and convert to various formats using PyMuPDF.
+
+**Purpose:** Extract individual pages or page ranges from PDFs with support for page labels/aliases as they appear in PDF readers.
 
 **Parameters:**
 - `file` (required): Path to PDF file
-- `pages` (required): Comma-separated page numbers or ranges (e.g., "1,3,5-10")
-- `format` (optional): Output format - markdown, html, plain, latex, docx (default: markdown)
+- `pages` (required): Comma-separated page specifications - supports:
+  - Page labels: "v", "vii", "ToC", "Introduction" (as shown in PDF readers)
+  - Page ranges: "v-vii", "1-5"
+  - Physical pages: "1", "14" (1-based if not found as label)
+  - Mixed: "v,vii,1,5-8,ToC"
+- `format` (optional): Output format - markdown, html, plain (default: markdown)
 - `preserve_layout` (optional): Try to preserve original layout (default: false)
+- `clean_html` (optional): Strip HTML styling tags like `<span style="...">` (default: true)
+- `fuzzy_hint` (optional): Fuzzy search string to filter extracted pages by content
+- `zero_based` (optional): Interpret page numbers as 0-based indices (default: false)
+  - When true, all numbers are treated as direct 0-based page indices
+  - "0" = first page, "266" = 267th page, "0-4" = first 5 pages
+  - No page label lookup is performed when this is true
 
 **Example:**
 ```python
 {
   "file": "research_paper.pdf",
-  "pages": "1,5-10,15",
-  "format": "markdown"
+  "pages": "v-vii,1,5-10,ToC",  # Mix of page labels and numbers
+  "format": "markdown",
+  "clean_html": true,
+  "fuzzy_hint": "neural network"  # Only include pages mentioning this
+}
+
+# Example with zero_based=true
+{
+  "file": "research_paper.pdf",
+  "pages": "0,266-273",  # Direct 0-based indices: page 1 and pages 267-274
+  "zero_based": true
+}
+```
+
+#### `get_pdf_page_labels`
+Get all page labels from a PDF file.
+
+**Purpose:** Returns a mapping of page indices to their labels/aliases as shown in PDF readers, helpful for understanding available page labels before extraction.
+
+**Parameters:**
+- `file` (required): Path to PDF file
+
+**Example:**
+```python
+{
+  "file": "research_paper.pdf"
+}
+
+# Returns something like:
+{
+  "page_labels": {
+    "0": "Cover",
+    "1": "i",
+    "2": "ii", 
+    "3": "iii",
+    "4": "iv",
+    "5": "v",
+    "6": "vi",
+    "7": "vii",
+    "8": "viii",
+    "9": "1",
+    "10": "2",
+    "11": "3"
+  },
+  "page_count": 150
+}
+```
+
+#### `get_pdf_page_count`
+Get the total number of pages in a PDF file.
+
+**Purpose:** Returns the total page count, useful for understanding the document size before extraction.
+
+**Parameters:**
+- `file` (required): Path to PDF file
+
+**Example:**
+```python
+{
+  "file": "research_paper.pdf"
+}
+
+# Returns:
+{
+  "page_count": 150
 }
 ```
 
@@ -827,13 +926,13 @@ Extract specific pages from a PDF and convert to various formats (requires optio
 Execute SELECT queries on the database.
 
 **Parameters:**
-- `sql` (required): SELECT query to execute
+- `query` (required): SELECT query to execute
 - `db_path` (optional): Path to SQLite database (defaults to configured db_path or ':memory:')
 
 **Example:**
 ```python
 {
-  "sql": "SELECT * FROM users WHERE active = 1 ORDER BY created_at DESC LIMIT 10",
+  "query": "SELECT * FROM users WHERE active = 1 ORDER BY created_at DESC LIMIT 10",
   "db_path": "myapp.db"
 }
 ```
@@ -842,13 +941,13 @@ Execute SELECT queries on the database.
 Execute INSERT, UPDATE, or DELETE queries (requires write permissions).
 
 **Parameters:**
-- `sql` (required): INSERT, UPDATE, or DELETE query to execute
+- `query` (required): INSERT, UPDATE, or DELETE query to execute
 - `db_path` (optional): Path to SQLite database
 
 **Example:**
 ```python
 {
-  "sql": "UPDATE users SET last_login = datetime('now') WHERE id = 123",
+  "query": "UPDATE users SET last_login = datetime('now') WHERE id = 123",
   "db_path": "myapp.db"
 }
 ```
@@ -1067,6 +1166,9 @@ This project is open source and available under the [MIT License](LICENSE).
 ### Fuzzy Search Server
 - [ripgrep](https://github.com/BurntSushi/ripgrep) - Recursively search directories for text patterns
 - [fzf](https://github.com/junegunn/fzf) - A command-line fuzzy finder
+- [PyMuPDF](https://github.com/pymupdf/PyMuPDF) - Python bindings for MuPDF for PDF processing (optional)
+- [ripgrep-all](https://github.com/phiresky/ripgrep-all) - ripgrep, but also search in PDFs, E-Books, Office documents (optional)
+- [pandoc](https://pandoc.org/) - Universal markup converter (optional)
 
 ### SQLite Server
 - [SQLite](https://www.sqlite.org/) - Self-contained, serverless, zero-configuration SQL database engine

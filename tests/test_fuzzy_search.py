@@ -983,7 +983,7 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
     pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
     test_pdf.write_bytes(pdf_content)
 
-    # Mock the rga JSON output
+    # Mock the rga JSON output with Page prefix
     mock_rga_output = (
         '''{"type":"match","data":{"path":{"text":"'''
         + str(test_pdf)
@@ -996,8 +996,8 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
     with patch("subprocess.Popen") as mock_popen:
         # Mock rga process
         mock_rga_proc = MagicMock()
-        # Make stdout an iterable that yields lines
-        mock_rga_proc.stdout = iter(mock_rga_output.splitlines())
+        # Mock communicate() to return the output
+        mock_rga_proc.communicate.return_value = (mock_rga_output, "")
         mock_rga_proc.wait.return_value = None
 
         # Mock fzf process - needs to match the format produced by rga
@@ -1012,29 +1012,59 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
         # Configure mocks
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 
-        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
-            result = await client.call_tool(
-                "fuzzy_search_documents",
-                {"fuzzy_filter": "test", "path": str(tmp_path)},
-            )
+        # Mock PyMuPDF if available
+        if mcp_fuzzy_search.PYMUPDF_AVAILABLE:
+            mock_doc = MagicMock()
+            mock_doc.page_count = 1
+            # Mock individual page access
+            mock_page = MagicMock()
+            mock_page.get_label.return_value = "Cover"
+            mock_doc.__getitem__.return_value = mock_page
+            mock_doc.close.return_value = None
 
-            data = json.loads(result.content[0].text)
-            # Debug output
-            if "error" in data:
-                print(f"ERROR: {data['error']}")
-            print(f"Got data: {data}")
-            assert "matches" in data
-            assert len(data["matches"]) == 1
+            with patch("fitz.open", return_value=mock_doc):
+                async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                    result = await client.call_tool(
+                        "fuzzy_search_documents",
+                        {"fuzzy_filter": "test", "path": str(tmp_path)},
+                    )
 
-            match = data["matches"][0]
-            assert "file" in match
-            assert "page" in match
-            assert "content" in match
-            assert "match_text" in match
+                    data = json.loads(result.content[0].text)
+                    # Debug output
+                    if "error" in data:
+                        print(f"ERROR: {data['error']}")
+                    print(f"Got data: {data}")
+                    assert "matches" in data
+                    assert len(data["matches"]) == 1
 
-            assert match["page"] == 1
-            assert "test content" in match["content"]
-            assert match["match_text"] == "test"
+                    match = data["matches"][0]
+                    assert "file" in match
+                    assert "page" in match
+                    assert "content" in match
+                    assert "match_text" in match
+
+                    assert match["page"] == 1
+                    assert "test content" in match["content"]
+                    assert match["match_text"] == "test"
+
+                    # Check for page label
+                    assert "page_label" in match
+                    assert match["page_label"] == "Cover"
+        else:
+            # Test without PyMuPDF
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                result = await client.call_tool(
+                    "fuzzy_search_documents",
+                    {"fuzzy_filter": "test", "path": str(tmp_path)},
+                )
+
+                data = json.loads(result.content[0].text)
+                assert "matches" in data
+                assert len(data["matches"]) == 1
+
+                match = data["matches"][0]
+                assert match["page"] == 1
+                assert "page_label" not in match  # No label without PyMuPDF
 
 
 async def test_fuzzy_search_documents_parse_rga_json():
@@ -1054,6 +1084,86 @@ async def test_fuzzy_search_documents_parse_rga_json():
     page_match = re.match(r"Page (\d+):", lines_text)
     assert page_match is not None
     assert int(page_match.group(1)) == 402
+
+
+async def test_fuzzy_search_documents_with_page_labels(tmp_path: Path):
+    """Test fuzzy_search_documents correctly extracts page labels from PDFs."""
+    _skip_if_missing("rga")
+    _skip_if_missing("fzf")
+
+    if not mcp_fuzzy_search.PYMUPDF_AVAILABLE:
+        pytest.skip("PyMuPDF not available")
+
+    # Create a mock PDF file
+    test_pdf = tmp_path / "test_labels.pdf"
+    test_pdf.write_bytes(b"%PDF-1.4\n%fake pdf")
+
+    # Mock rga output with multiple pages
+    mock_rga_output = [
+        f'{{"type":"match","data":{{"path":{{"text":"{test_pdf}"}},"lines":{{"text":"Page 1: Introduction to concepts"}},"line_number":null,"absolute_offset":100,"submatches":[{{"match":{{"text":"concepts"}},"start":25,"end":33}}]}}}}',
+        f'{{"type":"match","data":{{"path":{{"text":"{test_pdf}"}},"lines":{{"text":"Page 5: Chapter 1 begins"}},"line_number":null,"absolute_offset":500,"submatches":[{{"match":{{"text":"Chapter"}},"start":8,"end":15}}]}}}}',
+        f'{{"type":"match","data":{{"path":{{"text":"{test_pdf}"}},"lines":{{"text":"Page 10: Table of contents"}},"line_number":null,"absolute_offset":1000,"submatches":[{{"match":{{"text":"contents"}},"start":18,"end":26}}]}}}}',
+    ]
+
+    with patch("subprocess.Popen") as mock_popen:
+        # Mock rga process
+        mock_rga_proc = MagicMock()
+        # Join the mock output lines
+        mock_rga_proc.communicate.return_value = ("\n".join(mock_rga_output), "")
+        mock_rga_proc.wait.return_value = None
+
+        # Mock fzf process
+        mock_fzf_proc = MagicMock()
+        mock_fzf_proc.communicate.return_value = (
+            f"{test_pdf}:0:Page 1: Introduction to concepts\n{test_pdf}:0:Page 5: Chapter 1 begins\n{test_pdf}:0:Page 10: Table of contents",
+            None,
+        )
+
+        mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
+
+        # Mock PyMuPDF with page labels
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        # 10 pages with labels: i, ii, iii, iv, 1, 2, 3, 4, 5, ToC
+        page_labels = ["i", "ii", "iii", "iv", "1", "2", "3", "4", "5", "ToC"]
+
+        # Mock page access to return correct labels
+        def mock_getitem(index):
+            mock_page = MagicMock()
+            mock_page.get_label.return_value = page_labels[index]
+            return mock_page
+
+        mock_doc.__getitem__.side_effect = mock_getitem
+        mock_doc.close.return_value = None
+
+        with patch("fitz.open", return_value=mock_doc):
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                result = await client.call_tool(
+                    "fuzzy_search_documents",
+                    {"fuzzy_filter": "concept chapter content", "path": str(tmp_path)},
+                )
+
+                data = json.loads(result.content[0].text)
+                assert "matches" in data
+                assert len(data["matches"]) == 3
+
+                # Check first match - Page 1 (label "i")
+                match1 = data["matches"][0]
+                assert match1["page"] == 1
+                assert match1["page_label"] == "i"
+                assert "Introduction" in match1["content"]
+
+                # Check second match - Page 5 (label "1")
+                match2 = data["matches"][1]
+                assert match2["page"] == 5
+                assert match2["page_label"] == "1"
+                assert "Chapter" in match2["content"]
+
+                # Check third match - Page 10 (label "ToC")
+                match3 = data["matches"][2]
+                assert match3["page"] == 10
+                assert match3["page_label"] == "ToC"
+                assert "contents" in match3["content"]
 
 
 async def test_extract_pdf_pages_missing_binaries():
@@ -1195,7 +1305,7 @@ async def test_fuzzy_search_documents_with_file_types(tmp_path: Path):
     with patch("subprocess.Popen") as mock_popen:
         # Mock processes
         mock_rga_proc = MagicMock()
-        mock_rga_proc.stdout = []
+        mock_rga_proc.communicate.return_value = ("", "")
         mock_rga_proc.wait.return_value = None
 
         mock_fzf_proc = MagicMock()
@@ -1216,9 +1326,17 @@ async def test_fuzzy_search_documents_with_file_types(tmp_path: Path):
             # Check that rga was called with the right adapter flags
             rga_call = mock_popen.call_args_list[0]
             args = rga_call[0][0]
-            assert "--rga-adapters" in args
-            assert "+pdf" in args
-            assert "+docx" in args
+            # Find the adapter argument with equals sign
+            adapter_arg = None
+            for arg in args:
+                if arg.startswith("--rga-adapters="):
+                    adapter_arg = arg
+                    break
+            assert adapter_arg is not None
+            # Check for actual adapter names in the combined string
+            assert (
+                adapter_arg == "--rga-adapters=+poppler,pandoc"
+            )  # pdf maps to poppler, docx maps to pandoc
 
             # Verify the result (should have empty matches since mocks return empty)
             data = json.loads(result.content[0].text)
@@ -1798,6 +1916,252 @@ async def test_extract_pdf_pages_fuzzy_hint_no_matches(tmp_path: Path):
             assert data["pages_extracted"] == [0, 1]
             assert "Content for page 1" in data["content"]
             assert "Content for page 2" in data["content"]
+
+
+# ---------------------------------------------------------------------------
+# Zero-Based Index Tests
+# ---------------------------------------------------------------------------
+
+
+async def test_extract_pdf_pages_zero_based_single(tmp_path: Path):
+    """Test extract_pdf_pages with zero_based=True for single pages."""
+    test_pdf = tmp_path / "test.pdf"
+    # Create a minimal valid PDF that PyMuPDF can open
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create mock document with 5 pages
+        mock_doc = MagicMock()
+        mock_doc.page_count = 5
+        mock_doc.get_page_labels.return_value = ["i", "ii", "iii", "1", "2"]
+
+        # Create mock pages
+        mock_pages = {}
+        for i in range(5):
+            mock_page = MagicMock()
+            mock_page.get_text.return_value = f"Content from page {i}"
+            mock_page.get_label.return_value = mock_doc.get_page_labels.return_value[i]
+            mock_pages[i] = mock_page
+
+        # Configure document to return pages using __getitem__
+        def mock_getitem(self, idx):
+            return mock_pages.get(idx)
+
+        mock_doc.__getitem__ = mock_getitem
+        mock_doc.close = MagicMock()
+        mock_fitz_open.return_value = mock_doc
+
+        # Mock pandoc (need to patch subprocess.run in mcp_fuzzy_search module)
+        with patch("mcp_fuzzy_search.subprocess.run") as mock_run:
+            mock_pandoc_result = MagicMock()
+            mock_pandoc_result.returncode = 0
+            mock_pandoc_result.stdout = b"Markdown content"
+            mock_pandoc_result.stderr = b""
+            mock_run.return_value = mock_pandoc_result
+
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                # Test extracting pages using 0-based indices
+                result = await client.call_tool(
+                    "extract_pdf_pages",
+                    {
+                        "file": str(test_pdf),
+                        "pages": "0,2,4",  # First, third, and fifth pages
+                        "zero_based": True,
+                    },
+                )
+
+                data = json.loads(result.content[0].text)
+                assert "error" not in data
+                assert data["pages_extracted"] == [0, 2, 4]
+                # With zero_based=true, page_labels should show the 0-based indices
+                assert data["page_labels"] == ["0", "2", "4"]
+                assert data["format"] == "markdown"
+
+
+async def test_extract_pdf_pages_zero_based_ranges(tmp_path: Path):
+    """Test extract_pdf_pages with zero_based=True for ranges."""
+    test_pdf = tmp_path / "test.pdf"
+    # Create a minimal valid PDF that PyMuPDF can open
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create mock document with 10 pages
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        mock_doc.get_page_labels.return_value = [
+            "i",
+            "ii",
+            "iii",
+            "iv",
+            "v",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+        ]
+
+        # Create mock pages
+        mock_pages = {}
+        for i in range(10):
+            mock_page = MagicMock()
+            mock_page.get_text.return_value = f"Content from page {i}"
+            if i < len(mock_doc.get_page_labels.return_value):
+                mock_page.get_label.return_value = (
+                    mock_doc.get_page_labels.return_value[i]
+                )
+            else:
+                mock_page.get_label.return_value = str(i + 1)
+            mock_pages[i] = mock_page
+
+        # Configure document to return pages using __getitem__
+        def mock_getitem(self, idx):
+            return mock_pages.get(idx)
+
+        mock_doc.__getitem__ = mock_getitem
+        mock_doc.close = MagicMock()
+        mock_fitz_open.return_value = mock_doc
+
+        # Mock pandoc (need to patch subprocess.run in mcp_fuzzy_search module)
+        with patch("mcp_fuzzy_search.subprocess.run") as mock_run:
+            mock_pandoc_result = MagicMock()
+            mock_pandoc_result.returncode = 0
+            mock_pandoc_result.stdout = b"Markdown content"
+            mock_pandoc_result.stderr = b""
+            mock_run.return_value = mock_pandoc_result
+
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                # Test extracting pages using 0-based range
+                result = await client.call_tool(
+                    "extract_pdf_pages",
+                    {
+                        "file": str(test_pdf),
+                        "pages": "0-4",  # First 5 pages (0,1,2,3,4)
+                        "zero_based": True,
+                    },
+                )
+
+                data = json.loads(result.content[0].text)
+                assert "error" not in data
+                assert data["pages_extracted"] == [0, 1, 2, 3, 4]
+                # With zero_based=true and ranges, page_labels should show the 0-based indices
+                assert data["page_labels"] == ["0", "1", "2", "3", "4"]
+                assert data["format"] == "markdown"
+
+
+async def test_extract_pdf_pages_zero_based_mixed(tmp_path: Path):
+    """Test extract_pdf_pages with zero_based=True for mixed specifications."""
+    test_pdf = tmp_path / "test.pdf"
+    # Create a minimal valid PDF that PyMuPDF can open
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create mock document with 10 pages
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        mock_doc.get_page_labels.return_value = None  # No page labels
+
+        # Create mock pages
+        mock_pages = {}
+        for i in range(10):
+            mock_page = MagicMock()
+            mock_page.get_text.return_value = f"Content from page {i}"
+            mock_page.get_label.return_value = str(i + 1)
+            mock_pages[i] = mock_page
+
+        # Configure document to return pages using __getitem__
+        def mock_getitem(self, idx):
+            return mock_pages.get(idx)
+
+        mock_doc.__getitem__ = mock_getitem
+        mock_doc.close = MagicMock()
+        mock_fitz_open.return_value = mock_doc
+
+        # Mock pandoc (need to patch subprocess.run in mcp_fuzzy_search module)
+        with patch("mcp_fuzzy_search.subprocess.run") as mock_run:
+            mock_pandoc_result = MagicMock()
+            mock_pandoc_result.returncode = 0
+            mock_pandoc_result.stdout = b"Markdown content"
+            mock_pandoc_result.stderr = b""
+            mock_run.return_value = mock_pandoc_result
+
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                # Test extracting pages using mixed 0-based specifications
+                result = await client.call_tool(
+                    "extract_pdf_pages",
+                    {
+                        "file": str(test_pdf),
+                        "pages": "0,2-4,7,9",  # Pages 1, 3-5, 8, 10 (1-based)
+                        "zero_based": True,
+                    },
+                )
+
+                data = json.loads(result.content[0].text)
+                assert "error" not in data
+                assert data["pages_extracted"] == [0, 2, 3, 4, 7, 9]
+                assert data["page_labels"] == ["0", "2", "3", "4", "7", "9"]
+                assert data["format"] == "markdown"
+
+
+async def test_extract_pdf_pages_zero_based_errors(tmp_path: Path):
+    """Test extract_pdf_pages with zero_based=True error handling."""
+    test_pdf = tmp_path / "test.pdf"
+    # Create a minimal valid PDF that PyMuPDF can open
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create mock document with 5 pages
+        mock_doc = MagicMock()
+        mock_doc.page_count = 5
+        mock_fitz_open.return_value = mock_doc
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            # Test out of range index
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {
+                    "file": str(test_pdf),
+                    "pages": "10",  # Out of range (only 5 pages)
+                    "zero_based": True,
+                },
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "error" in data
+            assert "Must be a valid 0-based index" in data["error"]
+            assert "0 to 4" in data["error"]  # Should show valid range
+
+            # Test invalid range (start > end)
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {
+                    "file": str(test_pdf),
+                    "pages": "3-1",  # Invalid range
+                    "zero_based": True,
+                },
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "error" in data
+            assert "Must be a valid 0-based index" in data["error"]
+
+            # Test non-numeric input
+            result = await client.call_tool(
+                "extract_pdf_pages",
+                {
+                    "file": str(test_pdf),
+                    "pages": "abc",  # Not a number
+                    "zero_based": True,
+                },
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "error" in data
+            assert "Must be a valid 0-based index" in data["error"]
 
 
 # ---------------------------------------------------------------------------
