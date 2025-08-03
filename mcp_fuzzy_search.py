@@ -1582,8 +1582,29 @@ def fuzzy_search_documents(
             if line in line_to_data:
                 matches.append(line_to_data[line])
             else:
+                # Windows path handling - try to find the match with proper parsing
+                found_match = False
+                if platform.system() == "Windows" or ":" in line:
+                    # Parse the line using Windows-aware logic
+                    parts = line.split(":", 2)
+
+                    # Handle Windows drive letters (e.g., "C:\path\file.pdf:123:content")
+                    if len(parts) >= 3 and len(parts[0]) == 1 and parts[0].isalpha():
+                        # Windows drive letter detected, rejoin first two parts
+                        remaining = parts[2]
+                        colon_idx = remaining.find(":")
+                        if colon_idx != -1:
+                            file_path = parts[0] + ":" + parts[1]
+                            line_num = remaining[:colon_idx]
+                            content = remaining[colon_idx + 1 :]
+                            # Reconstruct the original formatted line
+                            reconstructed = f"{file_path}:{line_num}:{content}"
+                            if reconstructed in line_to_data:
+                                matches.append(line_to_data[reconstructed])
+                                found_match = True
+
                 # Debug output for missing matches
-                if (
+                if not found_match and (
                     platform.system() == "Windows"
                     or os.environ.get("GITHUB_ACTIONS") == "true"
                 ):
@@ -1592,7 +1613,7 @@ def fuzzy_search_documents(
                     )
                     # Try to find a similar key for debugging
                     for key in line_to_data.keys():
-                        if key.startswith(line.split(":")[0]):  # Same file path
+                        if key.split(":")[0] in line:  # Same file path
                             print(f"🔍 PDF search: similar key exists: {repr(key)}")
                             break
 
