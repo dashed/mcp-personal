@@ -906,7 +906,7 @@ def get_pdf_outline(
             while ol_item:
                 # Skip if max_depth is set and we've exceeded it
                 if max_depth is not None and level > max_depth:
-                    if hasattr(ol_item, 'next'):
+                    if hasattr(ol_item, "next"):
                         ol_item = ol_item.next
                     else:
                         break
@@ -918,21 +918,21 @@ def get_pdf_outline(
 
                 # Get title
                 title = ""
-                if hasattr(ol_item, 'title') and ol_item.title:
+                if hasattr(ol_item, "title") and ol_item.title:
                     title = ol_item.title
 
                 # Get page number (1-based)
-                is_external = hasattr(ol_item, 'is_external') and ol_item.is_external
+                is_external = hasattr(ol_item, "is_external") and ol_item.is_external
                 if not is_external:
-                    uri = getattr(ol_item, 'uri', None)
-                    page_num = getattr(ol_item, 'page', -1)
+                    uri = getattr(ol_item, "uri", None)
+                    page_num = getattr(ol_item, "page", -1)
                     if uri:
                         if page_num == -1:
                             # Resolve the link to get the page
                             try:
                                 resolve = doc.resolve_link(uri)
                                 page = resolve[0] + 1 if resolve else -1
-                            except:
+                            except Exception:
                                 page = -1
                         else:
                             page = page_num + 1
@@ -948,7 +948,7 @@ def get_pdf_outline(
                         page_idx = page - 1
                         page_obj = doc[page_idx]
                         page_label = page_obj.get_label()
-                    except:
+                    except Exception:
                         page_label = str(page)
 
                 # Build entry
@@ -958,23 +958,23 @@ def get_pdf_outline(
                     # Get detailed link information
                     link = {
                         "page": page,
-                        "uri": getattr(ol_item, 'uri', None),
+                        "uri": getattr(ol_item, "uri", None),
                         "is_external": is_external,
-                        "is_open": getattr(ol_item, 'is_open', False),
+                        "is_open": getattr(ol_item, "is_open", False),
                     }
-                    if hasattr(ol_item, 'dest') and ol_item.dest:
+                    if hasattr(ol_item, "dest") and ol_item.dest:
                         dest_info = {}
-                        if hasattr(ol_item.dest, 'kind'):
+                        if hasattr(ol_item.dest, "kind"):
                             dest_info["kind"] = ol_item.dest.kind
-                        if hasattr(ol_item.dest, 'page'):
+                        if hasattr(ol_item.dest, "page"):
                             dest_info["page"] = ol_item.dest.page
-                        if hasattr(ol_item.dest, 'uri'):
+                        if hasattr(ol_item.dest, "uri"):
                             dest_info["uri"] = ol_item.dest.uri
-                        if hasattr(ol_item.dest, 'lt') and ol_item.dest.lt:
+                        if hasattr(ol_item.dest, "lt") and ol_item.dest.lt:
                             dest_info["lt"] = list(ol_item.dest.lt)
-                        if hasattr(ol_item.dest, 'rb') and ol_item.dest.rb:
+                        if hasattr(ol_item.dest, "rb") and ol_item.dest.rb:
                             dest_info["rb"] = list(ol_item.dest.rb)
-                        if hasattr(ol_item.dest, 'zoom'):
+                        if hasattr(ol_item.dest, "zoom"):
                             dest_info["zoom"] = ol_item.dest.zoom
                         link["dest"] = dest_info
                     entry = [level, title, page, page_label, link]
@@ -982,11 +982,11 @@ def get_pdf_outline(
                 outline_list.append(entry)
 
                 # Recurse into children
-                if hasattr(ol_item, 'down') and ol_item.down:
+                if hasattr(ol_item, "down") and ol_item.down:
                     recurse_outline(ol_item.down, level + 1)
 
                 # Move to next sibling
-                if hasattr(ol_item, 'next'):
+                if hasattr(ol_item, "next"):
                     ol_item = ol_item.next
                 else:
                     break

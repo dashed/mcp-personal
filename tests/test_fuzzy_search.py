@@ -2528,3 +2528,457 @@ async def test_get_pdf_page_count_missing_file():
     data = json.loads(result.content[0].text)
     assert "error" in data
     assert "not found" in data["error"]
+
+
+# ---------------------------------------------------------------------------
+# PDF Outline Tests
+# ---------------------------------------------------------------------------
+
+
+async def test_get_pdf_outline_basic(tmp_path: Path):
+    """Test get_pdf_outline with basic outline structure."""
+    # Create a test PDF
+    test_pdf = tmp_path / "test_outline.pdf"
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    # Mock PyMuPDF
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create mock outline items
+        mock_outline1 = MagicMock()
+        mock_outline1.title = "Chapter 1"
+        mock_outline1.page = 0  # 0-based
+        mock_outline1.is_external = False
+        mock_outline1.is_open = True
+        mock_outline1.uri = None
+        mock_outline1.down = None
+        mock_outline1.next = MagicMock()
+
+        mock_outline2 = mock_outline1.next
+        mock_outline2.title = "Chapter 2"
+        mock_outline2.page = 4  # 0-based
+        mock_outline2.is_external = False
+        mock_outline2.is_open = True
+        mock_outline2.uri = None
+        mock_outline2.down = None
+        mock_outline2.next = None
+
+        # Create mock pages
+        mock_page1 = MagicMock()
+        mock_page1.get_label.return_value = "i"
+
+        mock_page2 = MagicMock()
+        mock_page2.get_label.return_value = "1"
+
+        # Create mock document
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        mock_doc.outline = mock_outline1
+        mock_doc.__getitem__.side_effect = [mock_page1, mock_page2]
+        mock_doc.close = MagicMock()
+
+        # Configure fitz.open to return mock document
+        mock_fitz_open.return_value = mock_doc
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "get_pdf_outline",
+                {"file": str(test_pdf)},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "outline" in data
+            assert "total_entries" in data
+            assert "max_depth_found" in data
+
+            assert data["total_entries"] == 2
+            assert data["max_depth_found"] == 1
+
+            # Check outline entries
+            assert len(data["outline"]) == 2
+            assert data["outline"][0] == [1, "Chapter 1", 1, "i"]
+            assert data["outline"][1] == [1, "Chapter 2", 5, "1"]
+
+
+async def test_get_pdf_outline_empty(tmp_path: Path):
+    """Test get_pdf_outline with PDF that has no outline."""
+    # Create a test PDF
+    test_pdf = tmp_path / "test_no_outline.pdf"
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    # Mock PyMuPDF
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create mock document with no outline
+        mock_doc = MagicMock()
+        mock_doc.page_count = 5
+        mock_doc.outline = None
+        mock_doc.close = MagicMock()
+
+        # Configure fitz.open to return mock document
+        mock_fitz_open.return_value = mock_doc
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "get_pdf_outline",
+                {"file": str(test_pdf)},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert data["outline"] == []
+            assert data["total_entries"] == 0
+            assert data["max_depth_found"] == 0
+
+
+async def test_get_pdf_outline_hierarchical(tmp_path: Path):
+    """Test get_pdf_outline with hierarchical outline structure."""
+    # Create a test PDF
+    test_pdf = tmp_path / "test_hierarchical.pdf"
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    # Mock PyMuPDF
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create hierarchical outline structure
+        # Chapter 1
+        #   Section 1.1
+        #     Subsection 1.1.1
+        #   Section 1.2
+        # Chapter 2
+
+        mock_subsection = MagicMock()
+        mock_subsection.title = "Subsection 1.1.1"
+        mock_subsection.page = 2
+        mock_subsection.is_external = False
+        mock_subsection.is_open = True
+        mock_subsection.uri = None
+        mock_subsection.down = None
+        mock_subsection.next = None
+
+        mock_section1_1 = MagicMock()
+        mock_section1_1.title = "Section 1.1"
+        mock_section1_1.page = 1
+        mock_section1_1.is_external = False
+        mock_section1_1.is_open = True
+        mock_section1_1.uri = None
+        mock_section1_1.down = mock_subsection
+        mock_section1_1.next = MagicMock()
+
+        mock_section1_2 = mock_section1_1.next
+        mock_section1_2.title = "Section 1.2"
+        mock_section1_2.page = 3
+        mock_section1_2.is_external = False
+        mock_section1_2.is_open = True
+        mock_section1_2.uri = None
+        mock_section1_2.down = None
+        mock_section1_2.next = None
+
+        mock_chapter1 = MagicMock()
+        mock_chapter1.title = "Chapter 1"
+        mock_chapter1.page = 0
+        mock_chapter1.is_external = False
+        mock_chapter1.is_open = True
+        mock_chapter1.uri = None
+        mock_chapter1.down = mock_section1_1
+        mock_chapter1.next = MagicMock()
+
+        mock_chapter2 = mock_chapter1.next
+        mock_chapter2.title = "Chapter 2"
+        mock_chapter2.page = 5
+        mock_chapter2.is_external = False
+        mock_chapter2.is_open = True
+        mock_chapter2.uri = None
+        mock_chapter2.down = None
+        mock_chapter2.next = None
+
+        # Create mock pages (need at least 6 pages since Chapter 2 is on page 5 (0-based))
+        mock_pages = []
+        for i in range(10):  # Create more pages to cover all references
+            mock_page = MagicMock()
+            mock_page.get_label.return_value = str(i + 1)
+            mock_pages.append(mock_page)
+
+        # Create mock document
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        mock_doc.outline = mock_chapter1
+        mock_doc.__getitem__.side_effect = lambda idx: mock_pages[idx]
+        mock_doc.close = MagicMock()
+
+        # Configure fitz.open to return mock document
+        mock_fitz_open.return_value = mock_doc
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "get_pdf_outline",
+                {"file": str(test_pdf)},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert data["total_entries"] == 5
+            assert data["max_depth_found"] == 3
+
+            # Check outline entries
+            assert len(data["outline"]) == 5
+            assert data["outline"][0] == [1, "Chapter 1", 1, "1"]
+            assert data["outline"][1] == [2, "Section 1.1", 2, "2"]
+            assert data["outline"][2] == [3, "Subsection 1.1.1", 3, "3"]
+            assert data["outline"][3] == [2, "Section 1.2", 4, "4"]
+            assert data["outline"][4] == [1, "Chapter 2", 6, "6"]
+
+
+async def test_get_pdf_outline_with_max_depth(tmp_path: Path):
+    """Test get_pdf_outline with max_depth parameter."""
+    # Create a test PDF
+    test_pdf = tmp_path / "test_max_depth.pdf"
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    # Mock PyMuPDF with same hierarchical structure as before
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create hierarchical outline structure
+        mock_subsection = MagicMock()
+        mock_subsection.title = "Subsection 1.1.1"
+        mock_subsection.page = 2
+        mock_subsection.is_external = False
+        mock_subsection.is_open = True
+        mock_subsection.uri = None
+        mock_subsection.down = None
+        mock_subsection.next = None
+
+        mock_section1_1 = MagicMock()
+        mock_section1_1.title = "Section 1.1"
+        mock_section1_1.page = 1
+        mock_section1_1.is_external = False
+        mock_section1_1.is_open = True
+        mock_section1_1.uri = None
+        mock_section1_1.down = mock_subsection
+        mock_section1_1.next = None
+
+        mock_chapter1 = MagicMock()
+        mock_chapter1.title = "Chapter 1"
+        mock_chapter1.page = 0
+        mock_chapter1.is_external = False
+        mock_chapter1.is_open = True
+        mock_chapter1.uri = None
+        mock_chapter1.down = mock_section1_1
+        mock_chapter1.next = None
+
+        # Create mock pages
+        mock_pages = []
+        for i in range(3):
+            mock_page = MagicMock()
+            mock_page.get_label.return_value = str(i + 1)
+            mock_pages.append(mock_page)
+
+        # Create mock document
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        mock_doc.outline = mock_chapter1
+        mock_doc.__getitem__.side_effect = mock_pages
+        mock_doc.close = MagicMock()
+
+        # Configure fitz.open to return mock document
+        mock_fitz_open.return_value = mock_doc
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "get_pdf_outline",
+                {"file": str(test_pdf), "max_depth": 2},
+            )
+
+            data = json.loads(result.content[0].text)
+            # Should only include entries up to depth 2
+            assert data["total_entries"] == 2
+            assert data["max_depth_found"] == 2
+
+            # Check outline entries - should not include depth 3
+            assert len(data["outline"]) == 2
+            assert data["outline"][0] == [1, "Chapter 1", 1, "1"]
+            assert data["outline"][1] == [2, "Section 1.1", 2, "2"]
+
+
+async def test_get_pdf_outline_with_fuzzy_filter(tmp_path: Path):
+    """Test get_pdf_outline with fuzzy filtering."""
+    # Create a test PDF
+    test_pdf = tmp_path / "test_fuzzy.pdf"
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    # Mock PyMuPDF
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create outline with different titles
+        mock_outline1 = MagicMock()
+        mock_outline1.title = "Introduction"
+        mock_outline1.page = 0
+        mock_outline1.is_external = False
+        mock_outline1.is_open = True
+        mock_outline1.uri = None
+        mock_outline1.down = None
+        mock_outline1.next = MagicMock()
+
+        mock_outline2 = mock_outline1.next
+        mock_outline2.title = "Chapter 1: Getting Started"
+        mock_outline2.page = 2
+        mock_outline2.is_external = False
+        mock_outline2.is_open = True
+        mock_outline2.uri = None
+        mock_outline2.down = None
+        mock_outline2.next = MagicMock()
+
+        mock_outline3 = mock_outline2.next
+        mock_outline3.title = "Chapter 2: Advanced Topics"
+        mock_outline3.page = 5
+        mock_outline3.is_external = False
+        mock_outline3.is_open = True
+        mock_outline3.uri = None
+        mock_outline3.down = None
+        mock_outline3.next = None
+
+        # Create mock pages
+        mock_pages = []
+        for i in range(6):
+            mock_page = MagicMock()
+            mock_page.get_label.return_value = str(i + 1)
+            mock_pages.append(mock_page)
+
+        # Create mock document
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        mock_doc.outline = mock_outline1
+        mock_doc.__getitem__.side_effect = mock_pages
+        mock_doc.close = MagicMock()
+
+        # Configure fitz.open to return mock document
+        mock_fitz_open.return_value = mock_doc
+
+        # Mock fzf subprocess for fuzzy filtering
+        with patch("subprocess.run") as mock_run:
+            # Simulate fzf filtering for "chapter"
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stdout = (
+                "1:Chapter 1: Getting Started\n2:Chapter 2: Advanced Topics"
+            )
+            mock_run.return_value = mock_result
+
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                result = await client.call_tool(
+                    "get_pdf_outline",
+                    {"file": str(test_pdf), "fuzzy_filter": "chapter"},
+                )
+
+                data = json.loads(result.content[0].text)
+                assert "filtered_count" in data
+                assert data["filtered_count"] == 2
+                assert data["total_entries"] == 3
+
+                # Check filtered outline entries
+                assert len(data["outline"]) == 2
+                assert data["outline"][0][1] == "Chapter 1: Getting Started"
+                assert data["outline"][1][1] == "Chapter 2: Advanced Topics"
+
+
+async def test_get_pdf_outline_detailed_output(tmp_path: Path):
+    """Test get_pdf_outline with detailed output (simple=False)."""
+    # Create a test PDF
+    test_pdf = tmp_path / "test_detailed.pdf"
+    pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000058 00000 n\n0000000115 00000 n\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n203\n%%EOF"
+    test_pdf.write_bytes(pdf_content)
+
+    # Mock PyMuPDF
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        # Create outline with link details
+        mock_outline = MagicMock()
+        mock_outline.title = "Chapter 1"
+        mock_outline.page = 0
+        mock_outline.is_external = False
+        mock_outline.is_open = True
+        mock_outline.uri = "#page=1&zoom=100,0,0"
+        mock_outline.down = None
+        mock_outline.next = None
+
+        # Mock dest object
+        mock_dest = MagicMock()
+        mock_dest.kind = 1
+        mock_dest.page = 0
+        mock_dest.uri = "#page=1&zoom=100,0,0"
+        mock_dest.lt = None
+        mock_dest.rb = None
+        mock_dest.zoom = 100
+        mock_outline.dest = mock_dest
+
+        # Create mock page
+        mock_page = MagicMock()
+        mock_page.get_label.return_value = "1"
+
+        # Create mock document
+        mock_doc = MagicMock()
+        mock_doc.page_count = 10
+        mock_doc.outline = mock_outline
+        mock_doc.__getitem__.return_value = mock_page
+        mock_doc.close = MagicMock()
+
+        # Configure fitz.open to return mock document
+        mock_fitz_open.return_value = mock_doc
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "get_pdf_outline",
+                {"file": str(test_pdf), "simple": False},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert len(data["outline"]) == 1
+
+            # Check detailed entry format
+            entry = data["outline"][0]
+            assert len(entry) == 5  # [level, title, page, page_label, link]
+            assert entry[0] == 1  # level
+            assert entry[1] == "Chapter 1"  # title
+            assert entry[2] == 1  # page
+            assert entry[3] == "1"  # page_label
+
+            # Check link details
+            link = entry[4]
+            assert link["page"] == 1
+            assert link["uri"] == "#page=1&zoom=100,0,0"
+            assert link["is_external"] is False
+            assert link["is_open"] is True
+            assert "dest" in link
+            assert link["dest"]["kind"] == 1
+            assert link["dest"]["zoom"] == 100
+
+
+async def test_get_pdf_outline_missing_file():
+    """Test get_pdf_outline with missing file."""
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "get_pdf_outline",
+            {"file": "/nonexistent/file.pdf"},
+        )
+
+    data = json.loads(result.content[0].text)
+    assert "error" in data
+    assert "not found" in data["error"]
+
+
+async def test_get_pdf_outline_invalid_pdf(tmp_path: Path):
+    """Test get_pdf_outline with invalid PDF."""
+    # Create an invalid PDF file
+    test_pdf = tmp_path / "invalid.pdf"
+    test_pdf.write_text("This is not a valid PDF")
+
+    # Mock PyMuPDF to raise an exception
+    with patch("mcp_fuzzy_search.fitz.open") as mock_fitz_open:
+        mock_fitz_open.side_effect = Exception("Invalid PDF format")
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "get_pdf_outline",
+                {"file": str(test_pdf)},
+            )
+
+        data = json.loads(result.content[0].text)
+        assert "error" in data
+        assert "Failed to get outline" in data["error"]
