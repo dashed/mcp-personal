@@ -90,6 +90,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import platform
 import re
 import shutil
 import subprocess
@@ -1074,15 +1076,34 @@ def fuzzy_search_content(
     """
     # Enable debug logging for Windows investigation (only in CI)
     import logging
-    import os
 
     logger = logging.getLogger(__name__)
 
-    # Only enable debug logging in CI environments, not locally
-    is_ci = os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true"
-    if is_ci:
+    # Force debug logging for CI investigation
+    is_ci = (
+        os.getenv("CI") == "true"
+        or os.getenv("GITHUB_ACTIONS") == "true"
+        or os.getenv("GITHUB_WORKSPACE")  # More reliable GitHub Actions indicator
+        or "runner" in os.getenv("USER", "").lower()  # GitHub Actions runner user
+        or os.getenv("RUNNER_OS")  # GitHub Actions runner OS
+    )
+
+    # Enable debug logging if in CI or if Windows (for debugging)
+    enable_debug = is_ci or platform.system().lower() == "windows"
+
+    if enable_debug:
         logging.basicConfig(
-            level=logging.DEBUG, format="%(levelname)s:%(name)s:%(message)s"
+            level=logging.DEBUG, format="%(levelname)s:%(name)s:%(message)s", force=True
+        )
+        logger.debug("=== WINDOWS DEBUG START ===")
+        logger.debug(
+            "Environment check: CI=%r, GITHUB_ACTIONS=%r, GITHUB_WORKSPACE=%r, USER=%r, RUNNER_OS=%r, platform=%r",
+            os.getenv("CI"),
+            os.getenv("GITHUB_ACTIONS"),
+            os.getenv("GITHUB_WORKSPACE"),
+            os.getenv("USER"),
+            os.getenv("RUNNER_OS"),
+            platform.system(),
         )
         logger.debug(
             "fuzzy_search_content called with: fuzzy_filter=%r, path=%r, hidden=%r, limit=%r, rg_flags=%r, multiline=%r, content_only=%r",
@@ -1218,10 +1239,10 @@ def fuzzy_search_content(
                     "--nth=1,3..",
                 ]
 
-            if is_ci:
+            if enable_debug:
                 logger.debug("Pipeline: %s | %s", " ".join(rg_cmd), " ".join(fzf_cmd))
 
-                # In CI, use subprocess.run for detailed debugging
+                # In CI or Windows, use subprocess.run for detailed debugging
                 rg_proc = subprocess.run(rg_cmd, capture_output=True, text=True)
                 logger.debug("Ripgrep returncode: %d", rg_proc.returncode)
                 logger.debug("Ripgrep stdout length: %d", len(rg_proc.stdout))
@@ -1274,14 +1295,14 @@ def fuzzy_search_content(
             # Parse results
             matches = []
             lines = out.splitlines()
-            if is_ci:
+            if enable_debug:
                 logger.debug("Total output lines to parse: %d", len(lines))
 
             for i, line in enumerate(lines):
                 if not line:
                     continue
 
-                if is_ci:
+                if enable_debug:
                     logger.debug("Parsing line %d: %r", i, line)
                 # Parse ripgrep output: file:line:content
                 parts = line.split(":", 2)
@@ -1293,20 +1314,21 @@ def fuzzy_search_content(
                             "content": parts[2].strip(),
                         }
                         matches.append(match)
-                        if is_ci:
+                        if enable_debug:
                             logger.debug("Added match: %r", match)
                     except (ValueError, IndexError) as e:
-                        if is_ci:
+                        if enable_debug:
                             logger.debug("Failed to parse line %d: %s", i, e)
                         continue
                 else:
-                    if is_ci:
+                    if enable_debug:
                         logger.debug(
                             "Line %d has insufficient parts: %d", i, len(parts)
                         )
 
-            if is_ci:
+            if enable_debug:
                 logger.debug("Final matches count: %d", len(matches))
+                logger.debug("=== WINDOWS DEBUG END ===")
 
         # Apply limit
         matches = matches[:limit]
