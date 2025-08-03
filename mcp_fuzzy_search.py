@@ -1089,13 +1089,14 @@ def fuzzy_search_content(
     )
 
     # Enable debug logging if in CI or if Windows (for debugging)
-    # BUT only if we're not in a test environment (detected by checking for pytest)
-    in_pytest = (
-        "pytest" in sys.modules
-        or os.getenv("PYTEST_CURRENT_TEST") is not None
-        or "pytest" in str(sys.argv[0]).lower()
+    # BUT only if subprocess.Popen is not mocked (to distinguish real vs mocked tests)
+    popen_is_mocked = (
+        hasattr(subprocess.Popen, "_mock_name")
+        or str(type(subprocess.Popen)).find("Mock") != -1
     )
-    enable_debug = (is_ci or platform.system().lower() == "windows") and not in_pytest
+    enable_debug = (
+        is_ci or platform.system().lower() == "windows"
+    ) and not popen_is_mocked
 
     if enable_debug:
         logging.basicConfig(
