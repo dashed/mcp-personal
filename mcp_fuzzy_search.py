@@ -1089,7 +1089,11 @@ def fuzzy_search_content(
     )
 
     # Enable debug logging if in CI or if Windows (for debugging)
-    enable_debug = is_ci or platform.system().lower() == "windows"
+    # BUT only if we're not in a test environment (detected by checking for mocked executables)
+    enable_debug = (is_ci or platform.system().lower() == "windows") and not (
+        "mock" in str(shutil.which("rg") or "").lower()
+        or "mock" in str(shutil.which("fzf") or "").lower()
+    )
 
     if enable_debug:
         logging.basicConfig(
