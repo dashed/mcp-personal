@@ -504,6 +504,10 @@ def extract_pdf_pages(
     if not pdf_path.exists():
         return {"error": f"PDF file not found: {file}"}
 
+    # Validate that zero_based and one_based are not both True
+    if zero_based and one_based:
+        return {"error": "Cannot use both zero_based and one_based flags together"}
+
     try:
         # Open PDF with PyMuPDF
         doc: fitz.Document = fitz.open(pdf_path)
