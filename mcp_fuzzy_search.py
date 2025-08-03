@@ -1566,17 +1566,17 @@ def fuzzy_search_documents(
         matches = []
         fzf_output_lines = out.splitlines()
 
-        # Debug output for Windows path issues
-        if platform.system() == "Windows" or os.environ.get("GITHUB_ACTIONS") == "true":
-            print(f"🔍 PDF search: fzf returned {len(fzf_output_lines)} lines")
-            print(f"🔍 PDF search: line_to_data has {len(line_to_data)} keys")
-            if fzf_output_lines:
-                print(
-                    f"🔍 PDF search: first fzf output line: {repr(fzf_output_lines[0])}"
-                )
-            if line_to_data:
-                first_key = list(line_to_data.keys())[0]
-                print(f"🔍 PDF search: first line_to_data key: {repr(first_key)}")
+        # Debug output for Windows path issues (commented out to avoid test interference)
+        # if platform.system() == "Windows" or os.environ.get("GITHUB_ACTIONS") == "true":
+        #     print(f"🔍 PDF search: fzf returned {len(fzf_output_lines)} lines")
+        #     print(f"🔍 PDF search: line_to_data has {len(line_to_data)} keys")
+        #     if fzf_output_lines:
+        #         print(
+        #             f"🔍 PDF search: first fzf output line: {repr(fzf_output_lines[0])}"
+        #         )
+        #     if line_to_data:
+        #         first_key = list(line_to_data.keys())[0]
+        #         print(f"🔍 PDF search: first line_to_data key: {repr(first_key)}")
 
         for line in fzf_output_lines:
             if line in line_to_data:

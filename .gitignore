@@ -311,3 +311,4 @@ git-repos/**/.git/logs/
 # Test artifacts
 .test_cache/
 test_output/
+git-repos/

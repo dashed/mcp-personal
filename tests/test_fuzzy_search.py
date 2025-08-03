@@ -1009,19 +1009,7 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
             None,
         )
 
-        # On Windows, the code uses subprocess.run instead of Popen
-        # We need to mock both for the test to work correctly
-        mock_run_rga = MagicMock()
-        mock_run_rga.returncode = 0
-        mock_run_rga.stdout = mock_rga_output
-        mock_run_rga.stderr = ""
-
-        mock_run_fzf = MagicMock()
-        mock_run_fzf.returncode = 0
-        mock_run_fzf.stdout = f"{test_pdf}:0:Page 1: This is test content"
-        mock_run_fzf.stderr = None
-
-        # Configure mocks
+        # Configure mocks for subprocess.Popen
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 
         # Mock PyMuPDF if available
@@ -1035,37 +1023,34 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
             mock_doc.close.return_value = None
 
             with patch("fitz.open", return_value=mock_doc):
-                with patch("subprocess.run", side_effect=[mock_run_rga, mock_run_fzf]):
-                    async with client_session(
-                        mcp_fuzzy_search.mcp._mcp_server
-                    ) as client:
-                        result = await client.call_tool(
-                            "fuzzy_search_documents",
-                            {"fuzzy_filter": "test", "path": str(tmp_path)},
-                        )
+                async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                    result = await client.call_tool(
+                        "fuzzy_search_documents",
+                        {"fuzzy_filter": "test", "path": str(tmp_path)},
+                    )
 
-                        data = json.loads(result.content[0].text)
-                        # Debug output
-                        if "error" in data:
-                            print(f"ERROR: {data['error']}")
-                        print(f"Got data: {data}")
-                        assert "matches" in data
-                        assert len(data["matches"]) == 1
+                    data = json.loads(result.content[0].text)
+                    # Debug output
+                    if "error" in data:
+                        print(f"ERROR: {data['error']}")
+                    print(f"Got data: {data}")
+                    assert "matches" in data
+                    assert len(data["matches"]) == 1
 
-                        match = data["matches"][0]
-                        assert "file" in match
-                        assert "page" in match
-                        assert "content" in match
-                        assert "match_text" in match
+                    match = data["matches"][0]
+                    assert "file" in match
+                    assert "page" in match
+                    assert "content" in match
+                    assert "match_text" in match
 
-                        assert match["page"] == 1
-                        assert match["page_index_0based"] == 0
-                        assert "test content" in match["content"]
-                        assert match["match_text"] == "test"
+                    assert match["page"] == 1
+                    assert match["page_index_0based"] == 0
+                    assert "test content" in match["content"]
+                    assert match["match_text"] == "test"
 
-                        # Check for page label
-                        assert "page_label" in match
-                        assert match["page_label"] == "Cover"
+                    # Check for page label
+                    assert "page_label" in match
+                    assert match["page_label"] == "Cover"
         else:
             # Test without PyMuPDF
             async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
@@ -1138,16 +1123,6 @@ async def test_fuzzy_search_documents_with_page_labels(tmp_path: Path):
 
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 
-        # On Windows, the code uses subprocess.run instead of Popen
-        # We need to mock both for the test to work correctly
-        mock_run_rga = MagicMock()
-        mock_run_rga.returncode = 0
-        mock_run_rga.stdout = "\n".join(mock_rga_output)
-
-        mock_run_fzf = MagicMock()
-        mock_run_fzf.returncode = 0
-        mock_run_fzf.stdout = f"{test_pdf}:0:Page 1: Introduction to concepts\n{test_pdf}:0:Page 5: Chapter 1 begins\n{test_pdf}:0:Page 10: Table of contents"
-
         # Mock PyMuPDF with page labels
         mock_doc = MagicMock()
         mock_doc.page_count = 10
@@ -1164,40 +1139,39 @@ async def test_fuzzy_search_documents_with_page_labels(tmp_path: Path):
         mock_doc.close.return_value = None
 
         with patch("fitz.open", return_value=mock_doc):
-            with patch("subprocess.run", side_effect=[mock_run_rga, mock_run_fzf]):
-                async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
-                    result = await client.call_tool(
-                        "fuzzy_search_documents",
-                        {
-                            "fuzzy_filter": "concept chapter content",
-                            "path": str(tmp_path),
-                        },
-                    )
+            async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+                result = await client.call_tool(
+                    "fuzzy_search_documents",
+                    {
+                        "fuzzy_filter": "concept chapter content",
+                        "path": str(tmp_path),
+                    },
+                )
 
-                    data = json.loads(result.content[0].text)
-                    assert "matches" in data
-                    assert len(data["matches"]) == 3
+                data = json.loads(result.content[0].text)
+                assert "matches" in data
+                assert len(data["matches"]) == 3
 
-                    # Check first match - Page 1 (label "i")
-                    match1 = data["matches"][0]
-                    assert match1["page"] == 1
-                    assert match1["page_index_0based"] == 0
-                    assert match1["page_label"] == "i"
-                    assert "Introduction" in match1["content"]
+                # Check first match - Page 1 (label "i")
+                match1 = data["matches"][0]
+                assert match1["page"] == 1
+                assert match1["page_index_0based"] == 0
+                assert match1["page_label"] == "i"
+                assert "Introduction" in match1["content"]
 
-                    # Check second match - Page 5 (label "1")
-                    match2 = data["matches"][1]
-                    assert match2["page"] == 5
-                    assert match2["page_index_0based"] == 4
-                    assert match2["page_label"] == "1"
-                    assert "Chapter" in match2["content"]
+                # Check second match - Page 5 (label "1")
+                match2 = data["matches"][1]
+                assert match2["page"] == 5
+                assert match2["page_index_0based"] == 4
+                assert match2["page_label"] == "1"
+                assert "Chapter" in match2["content"]
 
-                    # Check third match - Page 10 (label "ToC")
-                    match3 = data["matches"][2]
-                    assert match3["page"] == 10
-                    assert match3["page_index_0based"] == 9
-                    assert match3["page_label"] == "ToC"
-                    assert "contents" in match3["content"]
+                # Check third match - Page 10 (label "ToC")
+                match3 = data["matches"][2]
+                assert match3["page"] == 10
+                assert match3["page_index_0based"] == 9
+                assert match3["page_label"] == "ToC"
+                assert "contents" in match3["content"]
 
 
 async def test_extract_pdf_pages_missing_binaries():
