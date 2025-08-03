@@ -23,7 +23,9 @@ Advanced search with both file name and content capabilities using `ripgrep` and
   - `fuzzy_search_content`: Search file CONTENTS with path+content matching by default
 - **PDF and document search** (optional) - search through PDFs, Office docs, and archives using `ripgrep-all`
 - **PDF page extraction** (optional) - extract specific pages from PDFs using PyMuPDF with page label support
-- **PDF information tools** (optional) - get page labels and page count from PDF files
+- **PDF information tools** (optional) - get page labels and page count from PDF files:
+  - `get_pdf_page_labels`: Get all page labels from a PDF file
+  - `get_pdf_page_count`: Get the total number of pages in a PDF file
 - **Simplified interface** - just provide fuzzy search terms (NO regex support)
 - **Multiline record processing** for complex pattern matching
 - **Standalone CLI** for testing and direct usage
