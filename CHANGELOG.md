@@ -30,6 +30,13 @@
 - **New PDF Information Tools**:
   - `get_pdf_page_labels`: Returns mapping of all page indices to their labels
   - `get_pdf_page_count`: Returns total number of pages in a PDF
+  - `get_pdf_outline`: Extracts table of contents/bookmarks from PDFs
+    - Returns hierarchical outline structure with levels, titles, page numbers, and page labels
+    - Supports `simple` mode (default) with basic info or detailed mode with link information
+    - Optional `max_depth` parameter to limit traversal depth for deep hierarchies
+    - Optional `fuzzy_filter` parameter to search outline entries by title using fzf
+    - Handles PDFs without outlines gracefully by returning empty structure
+    - Available in both CLI (`pdf-outline` command) and MCP tool interface
 - **Type Checking**: Added support for `ty` type checker
   - Updated Makefile to use `ty check --exclude git-repos`
   - Added `ty>=0.0.1a16` as dev dependency
@@ -56,6 +63,7 @@
   - Added `TYPE_CHECKING` imports and type annotations for conditional imports
   - Fixed `mcp.context` attribute issues with type: ignore comments
 - **Test Assertion**: Added missing assertion for `proc.stdin` in CLI tests
+- **Test Tool Count**: Updated `test_list_tools` to expect 7 tools with addition of `get_pdf_outline`
 
 ### Dependencies
 - Replaced `pdfminer.six>=20221105` with `PyMuPDF>=1.23.0` for PDF operations

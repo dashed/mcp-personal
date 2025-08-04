@@ -23,9 +23,10 @@ Advanced search with both file name and content capabilities using `ripgrep` and
   - `fuzzy_search_content`: Search file CONTENTS with path+content matching by default
 - **PDF and document search** (optional) - search through PDFs, Office docs, and archives using `ripgrep-all`
 - **PDF page extraction** (optional) - extract specific pages from PDFs using PyMuPDF with page label support
-- **PDF information tools** (optional) - get page labels and page count from PDF files:
+- **PDF information tools** (optional) - get page labels, page count, and table of contents from PDF files:
   - `get_pdf_page_labels`: Get all page labels from a PDF file
   - `get_pdf_page_count`: Get the total number of pages in a PDF file
+  - `get_pdf_outline`: Extract table of contents/bookmarks from a PDF file
 - **Simplified interface** - just provide fuzzy search terms (NO regex support)
 - **Multiline record processing** for complex pattern matching
 - **Standalone CLI** for testing and direct usage
@@ -339,6 +340,8 @@ Once configured in Claude Desktop, you can use natural language for advanced sea
 - "Search for 'vector' in PDF documents" (requires ripgrep-all)
 - "Find all references to 'machine learning' in PDFs and Word documents"
 - "Extract pages 5-10 from the user manual PDF"
+- "Get the table of contents from the research paper PDF"
+- "Show me the outline of chapters in the user manual"
 
 #### CLI Usage
 
@@ -385,6 +388,10 @@ The fuzzy search server also works as a standalone CLI tool:
 ./mcp_fuzzy_search.py page-labels manual.pdf  # List all page labels
 ./mcp_fuzzy_search.py page-labels manual.pdf --start 100 --limit 20  # Get labels for pages 100-119
 ./mcp_fuzzy_search.py page-count manual.pdf  # Get total page count
+./mcp_fuzzy_search.py pdf-outline manual.pdf  # Get table of contents
+./mcp_fuzzy_search.py pdf-outline manual.pdf --max-depth 2  # Limit to 2 levels
+./mcp_fuzzy_search.py pdf-outline manual.pdf --fuzzy-filter "chapter"  # Filter by title
+./mcp_fuzzy_search.py pdf-outline manual.pdf --no-simple  # Detailed output with links
 ```
 
 ### SQLite Server
@@ -964,6 +971,92 @@ Get the total number of pages in a PDF file.
   "page_count": 150
 }
 ```
+
+#### `get_pdf_outline`
+Extract the table of contents (outline/bookmarks) from a PDF file.
+
+**Purpose:** Returns the hierarchical outline structure with levels, titles, page numbers, and page labels, helpful for navigating complex PDFs and understanding document structure.
+
+**Parameters:**
+- `file` (required): Path to PDF file
+- `simple` (optional): Return basic info (default: true) or detailed info with link data (false)
+- `max_depth` (optional): Maximum depth to traverse in the outline hierarchy (default: unlimited)
+- `fuzzy_filter` (optional): Fuzzy search string to filter outline entries by title using fzf
+
+**Example:**
+```python
+{
+  "file": "research_paper.pdf"
+}
+
+# Returns (simple mode):
+{
+  "outline": [
+    [1, "Introduction", 1, "i"],
+    [1, "Chapter 1: Background", 5, "1"],
+    [2, "1.1 History", 6, "2"],
+    [2, "1.2 Related Work", 10, "6"],
+    [1, "Chapter 2: Methods", 15, "11"],
+    [2, "2.1 Data Collection", 16, "12"],
+    [3, "2.1.1 Sources", 17, "13"],
+    [2, "2.2 Analysis", 20, "16"]
+  ],
+  "total_entries": 8,
+  "max_depth_found": 3
+}
+
+# Example with filtering:
+{
+  "file": "research_paper.pdf",
+  "fuzzy_filter": "chapter"
+}
+
+# Returns:
+{
+  "outline": [
+    [1, "Chapter 1: Background", 5, "1"],
+    [1, "Chapter 2: Methods", 15, "11"]
+  ],
+  "total_entries": 8,
+  "max_depth_found": 3,
+  "filtered_count": 2
+}
+
+# Example with detailed output:
+{
+  "file": "research_paper.pdf",
+  "simple": false,
+  "max_depth": 2
+}
+
+# Returns:
+{
+  "outline": [
+    [1, "Introduction", 1, "i", {
+      "page": 1,
+      "uri": "#page=1&zoom=100,0,0",
+      "is_external": false,
+      "is_open": true,
+      "dest": {
+        "kind": 1,
+        "page": 0,
+        "uri": "#page=1&zoom=100,0,0"
+      }
+    }],
+    # ... more entries with link details
+  ],
+  "total_entries": 8,
+  "max_depth_found": 2
+}
+```
+
+**Outline Format:**
+- Simple mode returns: `[level, title, page, page_label]`
+  - `level`: Hierarchy level (1-based, 1 = top level)
+  - `title`: The bookmark/outline entry title
+  - `page`: Page number (1-based)
+  - `page_label`: Page label as shown in PDF readers (e.g., "i", "ii", "1", "ToC")
+- Detailed mode adds a 5th element with link information including destination details
 
 ### SQLite Server Tools
 
