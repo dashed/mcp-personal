@@ -3220,5 +3220,21 @@ def unique_function_name():
         assert len(data_file["matches"]) >= 1
         assert len(data_dir["matches"]) >= 1
 
-        # The content should be the same
-        assert data_file["matches"][0]["content"] == data_dir["matches"][0]["content"]
+        # Find the unique_function_name content in both results
+        file_contents = [
+            match["content"]
+            for match in data_file["matches"]
+            if "unique_function_name" in match["content"]
+        ]
+        dir_contents = [
+            match["content"]
+            for match in data_dir["matches"]
+            if "unique_function_name" in match["content"]
+        ]
+
+        # Both should find at least one match with the function name
+        assert len(file_contents) >= 1
+        assert len(dir_contents) >= 1
+
+        # At least one content match should be the same (allowing for ordering differences)
+        assert any(fc in dir_contents for fc in file_contents)
