@@ -351,12 +351,14 @@ The fuzzy search server also works as a standalone CLI tool:
 # Fuzzy search for file NAMES/PATHS
 ./mcp_fuzzy_search.py search-files "main" /path/to/search  # Find files with 'main' in the name
 ./mcp_fuzzy_search.py search-files "test" . --hidden --limit 10  # Find test files by name
+./mcp_fuzzy_search.py search-files "config" / --confirm-root  # Search from root (requires explicit confirmation)
 
 # Search file CONTENTS and filter with fzf (NO regex support)
 # Default: Matches on BOTH file paths AND content
 ./mcp_fuzzy_search.py search-content "TODO implement" .  # Find lines containing both terms
 ./mcp_fuzzy_search.py search-content "test.py: update" .  # Find 'update' in test.py files
 ./mcp_fuzzy_search.py search-content "error handle" src --rg-flags "-i"  # Case insensitive
+./mcp_fuzzy_search.py search-content "config" / --confirm-root  # Search from root (requires explicit confirmation)
 
 # Content-only mode: Match ONLY on content, ignore file paths
 ./mcp_fuzzy_search.py search-content "TODO implement" . --content-only  # Pure content search
@@ -374,6 +376,7 @@ The fuzzy search server also works as a standalone CLI tool:
 ./mcp_fuzzy_search.py search-documents "machine learning" .  # Search PDFs and docs
 ./mcp_fuzzy_search.py search-documents "invoice total" invoices/ --file-types "pdf"  # PDFs only
 ./mcp_fuzzy_search.py search-documents "contract" . --file-types "pdf,docx" --limit 5
+./mcp_fuzzy_search.py search-documents "report" / --confirm-root  # Search from root (requires explicit confirmation)
 
 # Extract specific pages from PDFs (using PyMuPDF)
 ./mcp_fuzzy_search.py extract-pdf manual.pdf "1,3,5-7"  # Extract pages 1, 3, 5, 6, 7
@@ -735,6 +738,7 @@ Search for file NAMES/PATHS using fuzzy matching.
 - `hidden` (optional): Include hidden files (default: false)
 - `limit` (optional): Maximum results to return (default: 20)
 - `multiline` (optional): When true, searches file CONTENTS instead of names (default: false)
+- `confirm_root` (optional): Allow searching from root directory (/) (default: false)
 
 **Example (File Name Search):**
 ```python
@@ -769,6 +773,7 @@ Search file contents with fuzzy filtering, matching on BOTH file paths AND conte
 - `rg_flags` (optional): Extra flags for ripgrep (see ripgrep flags reference)
 - `multiline` (optional): Enable multiline record processing (default: false)
 - `content_only` (optional): Match ONLY on content, ignore file paths (default: false)
+- `confirm_root` (optional): Allow searching from root directory (/) (default: false)
 
 **Matching Behavior:**
 - **Default (content_only=false)**: Matches on BOTH file paths AND content (skips line numbers)
@@ -809,6 +814,7 @@ Search through PDFs and other document formats using ripgrep-all (requires optio
 - `file_types` (optional): Comma-separated file types to search (e.g., "pdf,docx,epub")
 - `preview` (optional): Include preview context (default: true)
 - `limit` (optional): Maximum results to return (default: 20)
+- `confirm_root` (optional): Allow searching from root directory (/) (default: false)
 
 **Example:**
 ```python
@@ -1253,6 +1259,13 @@ Additionally uses:
 - Consider the security implications of each server's capabilities
 - Review server code before installation
 
+### Root Path Protection
+- **Built-in safety mechanism**: All search functions prevent accidental searches from root directory (/) by default
+- Searching from root without explicit confirmation returns an error message
+- To search from root directory, you must explicitly set `confirm_root=True` (MCP tools) or use `--confirm-root` flag (CLI)
+- This prevents unintended performance issues and excessive filesystem access
+- Cross-platform support: protects against both Unix root (/) and Windows drive roots (C:\, etc.)
+
 ### File Search Server
 - Has filesystem access based on user permissions
 - Be cautious when searching in sensitive directories
@@ -1281,6 +1294,12 @@ Additionally uses:
 ### "Cannot find the `fzf` binary"
 - Install fzf using your package manager
 - Ensure it's available in your PATH
+
+### "Searching from root directory (/) is likely incorrect and could be very slow"
+- This safety message appears when trying to search from the root directory without explicit confirmation
+- To search from root, add `confirm_root=True` parameter (MCP tools) or `--confirm-root` flag (CLI)
+- Consider using a more specific directory path instead for better performance
+- Example: `./mcp_fuzzy_search.py search-files "config" / --confirm-root`
 
 ### Tests failing
 - Check that required binaries are installed for each server

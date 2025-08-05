@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Added
+- **Root Path Validation**: Added safety mechanism to prevent accidental slow searches from root directory
+  - Added `confirm_root` parameter (default: false) to `fuzzy_search_files`, `fuzzy_search_content`, and `fuzzy_search_documents`
+  - Functions now check if search path resolves to root directory ("/" on Unix-like systems, drive root on Windows)
+  - Returns error message when attempting to search from root without explicitly setting `confirm_root=True`
+  - Prevents unintended performance issues from searching entire filesystem
+  - Available in both MCP tool interface and CLI with `--confirm-root` flag
+  - Cross-platform support for Windows drive roots (e.g., "C:\", "/") and Unix root ("/")
 - **Page Labels Slicing**: Added optional `start` and `limit` parameters to `get_pdf_page_labels` tool
   - `start`: 0-based index to begin retrieving labels (e.g., start=100 begins at page 100)
   - `limit`: Maximum number of labels to return (e.g., limit=20 returns at most 20 labels)
