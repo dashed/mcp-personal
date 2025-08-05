@@ -61,6 +61,10 @@
   - Page number is available as `page` (1-based), `page_index_0based` (0-based), and `page_label` (PDF label)
 
 ### Fixed
+- **File Path Handling in Content Search**: Fixed `fuzzy_search_content` to properly handle single file paths
+  - Added `--with-filename` flag when searching a single file to ensure consistent output format
+  - Previously returned empty results when given a file path instead of directory because ripgrep doesn't include filenames by default when searching single files
+  - Now provides consistent output format regardless of whether searching a file or directory
 - **PDF Extraction HTML Output**: Fixed issue where PDF extraction was outputting HTML styling tags like `<span style="font-family: TimesLTPro-Roman; font-size:9px">`
 - **Page Extraction Accuracy**: Fixed bug where requesting page "14" would return wrong page content
   - Properly handles PDF page labels vs physical page numbers

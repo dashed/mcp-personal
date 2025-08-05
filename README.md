@@ -355,8 +355,10 @@ The fuzzy search server also works as a standalone CLI tool:
 
 # Search file CONTENTS and filter with fzf (NO regex support)
 # Default: Matches on BOTH file paths AND content
+# Works with both directories and individual files
 ./mcp_fuzzy_search.py search-content "TODO implement" .  # Find lines containing both terms
 ./mcp_fuzzy_search.py search-content "test.py: update" .  # Find 'update' in test.py files
+./mcp_fuzzy_search.py search-content "function" specific_file.py  # Search within a single file
 ./mcp_fuzzy_search.py search-content "error handle" src --rg-flags "-i"  # Case insensitive
 ./mcp_fuzzy_search.py search-content "config" / --confirm-root  # Search from root (requires explicit confirmation)
 
@@ -763,11 +765,13 @@ Search for file NAMES/PATHS using fuzzy matching.
 #### `fuzzy_search_content`
 Search file contents with fuzzy filtering, matching on BOTH file paths AND content by default.
 
-**Purpose:** Find specific text/code using fuzzy search that considers both where it is (path) and what it is (content).
+**Purpose:** Find specific text/code using fuzzy search that considers both where it is (path) and what it is (content). Works consistently with both directories and individual files.
 
 **Parameters:**
 - `fuzzy_filter` (required): Fuzzy search query for filtering (does NOT support regex - use fzf syntax)
 - `path` (optional): Directory/file to search in (defaults to current directory)
+  - **Enhanced file path support**: Can now search both directories and individual files
+  - Automatically includes filename in output when searching a single file for consistent results
 - `hidden` (optional): Search hidden files (default: false)
 - `limit` (optional): Maximum results to return (default: 20)
 - `rg_flags` (optional): Extra flags for ripgrep (see ripgrep flags reference)
@@ -790,6 +794,15 @@ Search file contents with fuzzy filtering, matching on BOTH file paths AND conte
   "path": "./src",
   "rg_flags": "-i",
   "limit": 15
+}
+```
+
+**Example (Single File Search):**
+```python
+{
+  "fuzzy_filter": "function async",  # Find async functions in a specific file
+  "path": "./src/main.py",  # Search within a single file
+  "limit": 10
 }
 ```
 
