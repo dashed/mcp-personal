@@ -1483,6 +1483,11 @@ def fuzzy_search_content(
             if rg_flags:
                 rg_cmd.extend(rg_flags.split())
             search_path = str(Path(path).resolve())
+
+            # If searching a single file, ensure filename is included in output
+            if Path(search_path).is_file():
+                rg_cmd.append("--with-filename")
+
             rg_cmd.extend([".", search_path])  # Search for all content in the path
 
             # Pipe through fzf for fuzzy filtering

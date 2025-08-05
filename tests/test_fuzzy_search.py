@@ -3127,3 +3127,98 @@ async def test_fuzzy_search_documents_root_path_with_confirm():
 
             data = json.loads(result.content[0].text)
             assert "matches" in data  # Should succeed with confirm_root
+
+
+async def test_fuzzy_search_content_with_file_path(tmp_path: Path):
+    """Test fuzzy_search_content works correctly when given a file path instead of directory."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Create a test file with specific content
+    test_file = tmp_path / "single_file.py"
+    test_file.write_text("""def process_data():
+    # Process the data
+    data = load_data()
+    return transform_data(data)
+
+def transform_data(data):
+    # Transform the data
+    return data.upper()
+""")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        # Test searching in a single file
+        result = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "fuzzy_filter": "data",
+                "path": str(test_file),
+            },
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "matches" in data
+        assert len(data["matches"]) >= 3  # Should find multiple occurrences of "data"
+
+        # Verify all matches are from the same file
+        for match in data["matches"]:
+            assert str(test_file) in match["file"]
+            assert "data" in match["content"].lower()
+
+        # Test with content_only mode
+        result_content_only = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "fuzzy_filter": "transform",
+                "path": str(test_file),
+                "content_only": True,
+            },
+        )
+
+        data_content_only = json.loads(result_content_only.content[0].text)
+        assert "matches" in data_content_only
+        assert (
+            len(data_content_only["matches"]) >= 2
+        )  # Should find transform_data occurrences
+
+
+async def test_fuzzy_search_content_file_vs_directory(tmp_path: Path):
+    """Test that fuzzy_search_content produces consistent results for file vs directory containing that file."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Create a test file
+    test_file = tmp_path / "test_consistency.py"
+    test_file.write_text("""# This is a unique marker for testing
+def unique_function_name():
+    return "unique_result"
+""")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        # Search in the file directly
+        result_file = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "fuzzy_filter": "unique_function_name",
+                "path": str(test_file),
+            },
+        )
+
+        # Search in the directory containing the file
+        result_dir = await client.call_tool(
+            "fuzzy_search_content",
+            {
+                "fuzzy_filter": "unique_function_name test_consistency.py:",
+                "path": str(tmp_path),
+            },
+        )
+
+        data_file = json.loads(result_file.content[0].text)
+        data_dir = json.loads(result_dir.content[0].text)
+
+        # Both should find the function
+        assert len(data_file["matches"]) >= 1
+        assert len(data_dir["matches"]) >= 1
+
+        # The content should be the same
+        assert data_file["matches"][0]["content"] == data_dir["matches"][0]["content"]
