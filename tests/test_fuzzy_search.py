@@ -2989,3 +2989,141 @@ async def test_get_pdf_outline_invalid_pdf(tmp_path: Path):
         data = json.loads(result.content[0].text)
         assert "error" in data
         assert "Failed to get outline" in data["error"]
+
+
+async def test_fuzzy_search_files_root_path_validation():
+    """Test that searching from root directory without confirm_root fails."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "fuzzy_search_files", {"fuzzy_filter": "test", "path": "/"}
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "error" in data
+        assert "root directory" in data["error"].lower()
+        assert "confirm_root=True" in data["error"]
+
+
+async def test_fuzzy_search_files_root_path_with_confirm():
+    """Test that searching from root directory works with confirm_root=True."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Mock subprocess to avoid actually searching from root
+    with patch("subprocess.Popen") as mock_popen:
+        mock_proc = MagicMock()
+        mock_proc.stdout.close = MagicMock()
+        mock_proc.wait.return_value = None
+        mock_popen.return_value = mock_proc
+
+        # Mock the second Popen call for fzf
+        fzf_proc = MagicMock()
+        fzf_proc.communicate.return_value = ("test.txt\n", None)
+        mock_popen.side_effect = [mock_proc, fzf_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_files",
+                {"fuzzy_filter": "test", "path": "/", "confirm_root": True},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "matches" in data  # Should succeed with confirm_root
+
+
+async def test_fuzzy_search_content_root_path_validation():
+    """Test that searching content from root directory without confirm_root fails."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "fuzzy_search_content", {"fuzzy_filter": "test", "path": "/"}
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "error" in data
+        assert "root directory" in data["error"].lower()
+        assert "confirm_root=True" in data["error"]
+
+
+async def test_fuzzy_search_content_root_path_with_confirm():
+    """Test that searching content from root directory works with confirm_root=True."""
+    _skip_if_missing("rg")
+    _skip_if_missing("fzf")
+
+    # Mock subprocess to avoid actually searching from root
+    with patch("subprocess.Popen") as mock_popen:
+        mock_rg_proc = MagicMock()
+        mock_rg_proc.stdout = MagicMock()
+        mock_rg_proc.stderr = MagicMock()
+        mock_rg_proc.stderr.read.return_value = b""
+        mock_rg_proc.wait.return_value = 0
+        mock_rg_proc.returncode = 0
+
+        mock_fzf_proc = MagicMock()
+        mock_fzf_proc.communicate.return_value = ("/test.txt:1:test content\n", None)
+
+        mock_popen.side_effect = [mock_rg_proc, mock_fzf_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_content",
+                {"fuzzy_filter": "test", "path": "/", "confirm_root": True},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "matches" in data  # Should succeed with confirm_root
+
+
+async def test_fuzzy_search_documents_root_path_validation():
+    """Test that searching documents from root directory without confirm_root fails."""
+    # Skip if rga is not available
+    if shutil.which("rga") is None:
+        pytest.skip("rga not on PATH")
+    _skip_if_missing("fzf")
+
+    async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+        result = await client.call_tool(
+            "fuzzy_search_documents", {"fuzzy_filter": "test", "path": "/"}
+        )
+
+        data = json.loads(result.content[0].text)
+        assert "error" in data
+        assert "root directory" in data["error"].lower()
+        assert "confirm_root=True" in data["error"]
+
+
+async def test_fuzzy_search_documents_root_path_with_confirm():
+    """Test that searching documents from root directory works with confirm_root=True."""
+    # Skip if rga is not available
+    if shutil.which("rga") is None:
+        pytest.skip("rga not on PATH")
+    _skip_if_missing("fzf")
+
+    # Mock subprocess to avoid actually searching from root
+    with patch("subprocess.Popen") as mock_popen:
+        # Mock rga process
+        mock_rga_proc = MagicMock()
+        mock_rga_proc.communicate.return_value = (
+            '{"type":"match","data":{"path":{"text":"/test.pdf"},"lines":{"text":"test"},"line_number":1,"submatches":[{"match":{"text":"test"}}]}}\n',
+            "",
+        )
+
+        # Mock fzf process
+        mock_fzf_proc = MagicMock()
+        mock_fzf_proc.communicate.return_value = ("/test.pdf:1:test\n", None)
+
+        mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
+
+        async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
+            result = await client.call_tool(
+                "fuzzy_search_documents",
+                {"fuzzy_filter": "test", "path": "/", "confirm_root": True},
+            )
+
+            data = json.loads(result.content[0].text)
+            assert "matches" in data  # Should succeed with confirm_root

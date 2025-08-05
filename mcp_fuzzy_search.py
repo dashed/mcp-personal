@@ -1057,7 +1057,9 @@ def get_pdf_outline(
         "  path   (str, optional): Directory to search. Defaults to current dir.\n"
         "  hidden (bool, optional): Include hidden files. Default false.\n"
         "  limit  (int, optional): Max results to return. Default 20.\n"
-        "  multiline (bool, optional): Enable multiline file content search. Default false.\n\n"
+        "  multiline (bool, optional): Enable multiline file content search. Default false.\n"
+        "  confirm_root (bool, optional): Allow searching from root directory (/). Default false.\n"
+        "    Note: Searching from root (/) requires confirm_root=True to prevent accidental slow searches.\n\n"
         "fzf Query Syntax (NO REGEX SUPPORT):\n"
         "  CRITICAL: SPACES SEPARATE SEARCH TERMS - Each space creates a new fuzzy pattern!\n"
         "  Basic Terms: Space-separated terms use AND logic (all must match)\n"
@@ -1102,6 +1104,7 @@ def fuzzy_search_files(
     hidden: bool = False,
     limit: int = 20,
     multiline: bool = False,
+    confirm_root: bool = False,
 ) -> dict[str, Any]:
     """Find files using ripgrep + fzf fuzzy filtering with optional multiline content search."""
     if not fuzzy_filter:
@@ -1109,6 +1112,29 @@ def fuzzy_search_files(
 
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
+
+    # Check if path is root directory
+    resolved_path = Path(path).resolve()
+    is_root = False
+
+    # Check for root path on different platforms
+    if platform.system() == "Windows":
+        # On Windows, check if it's a drive root like C:\ or just \
+        is_root = str(resolved_path) in ["/", "\\"] or (
+            len(str(resolved_path)) <= 3 and str(resolved_path).endswith(("\\", "/"))
+        )
+    else:
+        # On Unix-like systems, check if it's /
+        is_root = str(resolved_path) == "/"
+
+    if is_root and not confirm_root:
+        return {
+            "error": (
+                "Searching from root directory (/) is likely incorrect and could be very slow. "
+                "If you really want to search from root, please set confirm_root=True. "
+                "Otherwise, specify a more specific directory path."
+            )
+        }
 
     try:
         if multiline:
@@ -1218,7 +1244,9 @@ def fuzzy_search_files(
         "  limit (int, optional): Max results to return. Default 20.\n"
         "  rg_flags (str, optional): Extra flags for ripgrep (see below).\n"
         "  multiline (bool, optional): Enable multiline record processing. Default false.\n"
-        "  content_only (bool, optional): Match only on content, ignore file paths. Default false.\n\n"
+        "  content_only (bool, optional): Match only on content, ignore file paths. Default false.\n"
+        "  confirm_root (bool, optional): Allow searching from root directory (/). Default false.\n"
+        "    Note: Searching from root (/) requires confirm_root=True to prevent accidental slow searches.\n\n"
         "Fuzzy Filter Syntax (NO REGEX - these are fzf patterns):\n"
         "  CRITICAL: SPACES MATTER! Each space separates fuzzy patterns (AND logic)\n"
         "  Basic search: 'update_ondemand_max_spend' → finds all occurrences\n"
@@ -1278,6 +1306,7 @@ def fuzzy_search_content(
     rg_flags: str = "",
     multiline: bool = False,
     content_only: bool = False,
+    confirm_root: bool = False,
 ) -> dict[str, Any]:
     """Search all content then apply fuzzy filtering - similar to 'rg . | fzf'.
 
@@ -1338,6 +1367,29 @@ def fuzzy_search_content(
 
     rg_bin = _require(RG_EXECUTABLE, "rg")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
+
+    # Check if path is root directory
+    resolved_path = Path(path).resolve()
+    is_root = False
+
+    # Check for root path on different platforms
+    if platform.system() == "Windows":
+        # On Windows, check if it's a drive root like C:\ or just \
+        is_root = str(resolved_path) in ["/", "\\"] or (
+            len(str(resolved_path)) <= 3 and str(resolved_path).endswith(("\\", "/"))
+        )
+    else:
+        # On Unix-like systems, check if it's /
+        is_root = str(resolved_path) == "/"
+
+    if is_root and not confirm_root:
+        return {
+            "error": (
+                "Searching from root directory (/) is likely incorrect and could be very slow. "
+                "If you really want to search from root, please set confirm_root=True. "
+                "Otherwise, specify a more specific directory path."
+            )
+        }
 
     try:
         if multiline:
@@ -1583,7 +1635,9 @@ def fuzzy_search_content(
         "  path (str, optional): Directory/file to search. Default: current dir.\n"
         "  file_types (str, optional): Comma-separated file types (pdf,docx,epub).\n"
         "  preview (bool, optional): Include preview context. Default: true.\n"
-        "  limit (int, optional): Max results. Default: 20.\n\n"
+        "  limit (int, optional): Max results. Default: 20.\n"
+        "  confirm_root (bool, optional): Allow searching from root directory (/). Default: false.\n"
+        "    Note: Searching from root (/) requires confirm_root=True to prevent accidental slow searches.\n\n"
         "Returns: { matches: Array<{file, content, match_text, page?, page_index_0based?, page_label?}> }\n"
         "  - page: Physical page number (1-based) for PDF files\n"
         "  - page_index_0based: Zero-based page index for programmatic access (page - 1)\n"
@@ -1596,6 +1650,7 @@ def fuzzy_search_documents(
     file_types: str = "",
     preview: bool = True,
     limit: int = 20,
+    confirm_root: bool = False,
 ) -> dict[str, Any]:
     """Search documents using ripgrep-all with fuzzy filtering."""
     if not fuzzy_filter:
@@ -1607,6 +1662,29 @@ def fuzzy_search_documents(
 
     rga_bin = _require(RGA_EXECUTABLE, "rga")
     fzf_bin = _require(FZF_EXECUTABLE, "fzf")
+
+    # Check if path is root directory
+    resolved_path = Path(path).resolve()
+    is_root = False
+
+    # Check for root path on different platforms
+    if platform.system() == "Windows":
+        # On Windows, check if it's a drive root like C:\ or just \
+        is_root = str(resolved_path) in ["/", "\\"] or (
+            len(str(resolved_path)) <= 3 and str(resolved_path).endswith(("\\", "/"))
+        )
+    else:
+        # On Unix-like systems, check if it's /
+        is_root = str(resolved_path) == "/"
+
+    if is_root and not confirm_root:
+        return {
+            "error": (
+                "Searching from root directory (/) is likely incorrect and could be very slow. "
+                "If you really want to search from root, please set confirm_root=True. "
+                "Otherwise, specify a more specific directory path."
+            )
+        }
 
     try:
         # Build rga command - pass everything to match ripgrep's behavior
@@ -1944,6 +2022,11 @@ def _cli() -> None:
     p_files.add_argument(
         "--multiline", action="store_true", help="Search file contents (multiline)"
     )
+    p_files.add_argument(
+        "--confirm-root",
+        action="store_true",
+        help="Allow searching from root directory (/)",
+    )
 
     # search-content subcommand
     p_content = sub.add_parser("search-content", help="Fuzzy search file content")
@@ -1960,6 +2043,11 @@ def _cli() -> None:
         action="store_true",
         help="Match only content, ignore file paths",
     )
+    p_content.add_argument(
+        "--confirm-root",
+        action="store_true",
+        help="Allow searching from root directory (/)",
+    )
 
     # search-documents subcommand
     p_docs = sub.add_parser("search-documents", help="Search PDFs and documents")
@@ -1969,6 +2057,11 @@ def _cli() -> None:
         "--file-types", default="", help="Comma-separated types (pdf,docx,epub)"
     )
     p_docs.add_argument("--limit", type=int, default=20, help="Max results")
+    p_docs.add_argument(
+        "--confirm-root",
+        action="store_true",
+        help="Allow searching from root directory (/)",
+    )
 
     # extract-pdf subcommand
     p_pdf = sub.add_parser("extract-pdf", help="Extract pages from PDF")
@@ -2048,7 +2141,12 @@ def _cli() -> None:
     # Execute command and print result
     if ns.cmd == "search-files":
         res = fuzzy_search_files(
-            ns.fuzzy_filter, ns.path, ns.hidden, ns.limit, ns.multiline
+            ns.fuzzy_filter,
+            ns.path,
+            ns.hidden,
+            ns.limit,
+            ns.multiline,
+            getattr(ns, "confirm_root", False),
         )
     elif ns.cmd == "search-content":
         res = fuzzy_search_content(
@@ -2059,10 +2157,16 @@ def _cli() -> None:
             ns.rg_flags,
             ns.multiline,
             ns.content_only,
+            getattr(ns, "confirm_root", False),
         )
     elif ns.cmd == "search-documents":
         res = fuzzy_search_documents(
-            ns.fuzzy_filter, ns.path, ns.file_types, True, ns.limit
+            ns.fuzzy_filter,
+            ns.path,
+            ns.file_types,
+            True,
+            ns.limit,
+            getattr(ns, "confirm_root", False),
         )
     elif ns.cmd == "extract-pdf":
         res = extract_pdf_pages(
