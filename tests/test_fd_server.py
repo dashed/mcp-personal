@@ -609,10 +609,10 @@ def test_multiline_cli_support():
         # Verify multiline=True was passed as a positional argument
         mock_filter.assert_called_once()
         call_args = mock_filter.call_args
-        # The function signature is filter_files(filter, pattern, path, first, fd_flags, fzf_flags, multiline)
-        # So multiline should be the 7th argument (index 6)
-        if len(call_args[0]) > 6:
-            assert call_args[0][6] is True  # positional argument
+        # The function signature is filter_files(filter, pattern, path, first, limit, fd_flags, fzf_flags, multiline)
+        # So multiline should be the 8th argument (index 7)
+        if len(call_args[0]) > 7:
+            assert call_args[0][7] is True  # positional argument
         else:
             # Check if it was passed as keyword argument
             assert call_args[1].get("multiline") is True

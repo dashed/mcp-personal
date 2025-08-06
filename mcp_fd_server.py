@@ -413,6 +413,7 @@ def _cli() -> None:
     p_search = sub.add_parser("search", help="fd search")
     p_search.add_argument("pattern")
     p_search.add_argument("path", nargs="?", default=".")
+    p_search.add_argument("--limit", type=int, default=0, help="Maximum results")
     p_search.add_argument("--flags", default="")
 
     # filter_files sub‑command
@@ -423,6 +424,7 @@ def _cli() -> None:
     p_filter.add_argument("pattern", nargs="?", default="")
     p_filter.add_argument("path", nargs="?", default=".")
     p_filter.add_argument("--first", action="store_true")
+    p_filter.add_argument("--limit", type=int, default=0, help="Maximum results")
     p_filter.add_argument("--fd-flags", default="")
     p_filter.add_argument("--fzf-flags", default="")
     p_filter.add_argument(
@@ -432,13 +434,14 @@ def _cli() -> None:
     ns = parser.parse_args()
 
     if ns.cmd == "search":
-        res = search_files(ns.pattern, ns.path, ns.flags)
+        res = search_files(ns.pattern, ns.path, ns.limit, ns.flags)
     else:
         res = filter_files(
             ns.filter,
             ns.pattern,
             ns.path,
             ns.first,
+            ns.limit,
             ns.fd_flags,
             ns.fzf_flags,
             ns.multiline,
