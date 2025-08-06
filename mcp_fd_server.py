@@ -180,6 +180,18 @@ def _suggest_fuzzy_terms(regex_pattern: str) -> str:
     return fuzzy
 
 
+def _handle_fzf_error(exc: subprocess.CalledProcessError, warnings: list[str]) -> dict[str, Any]:
+    """Handle fzf CalledProcessError, returning appropriate result dict."""
+    # fzf returns exit code 1 when no matches found - this is not an error
+    if exc.returncode == 1:
+        return {"matches": []}  # No matches found, return empty list
+
+    error_result: dict[str, Any] = {"error": str(exc)}
+    if warnings:
+        error_result["warnings"] = warnings
+    return error_result
+
+
 # ---------------------------------------------------------------------------
 # FastMCP server instance
 # ---------------------------------------------------------------------------
@@ -355,10 +367,7 @@ def filter_files(
                             matches.append(chunk.decode("utf-8", errors="replace"))
 
         except subprocess.CalledProcessError as exc:
-            error_result: dict[str, Any] = {"error": str(exc)}
-            if warnings:
-                error_result["warnings"] = warnings
-            return error_result
+            return _handle_fzf_error(exc, warnings)
     else:
         # Standard mode - file paths only
         fd_cmd: list[str] = [fd_bin, *shlex.split(fd_flags), pattern, search_path]
@@ -374,10 +383,7 @@ def filter_files(
             fd_proc.wait()
             matches = [_normalize_path(p) for p in out.splitlines() if p]
         except subprocess.CalledProcessError as exc:
-            error_result: dict[str, Any] = {"error": str(exc)}
-            if warnings:
-                error_result["warnings"] = warnings
-            return error_result
+            return _handle_fzf_error(exc, warnings)
 
     if first and matches:
         matches = matches[:1]
