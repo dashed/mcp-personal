@@ -1095,6 +1095,8 @@ def get_pdf_outline(
         "  Each file becomes a multiline record with 'filename:' prefix followed by content.\n"
         "  Useful for finding files containing specific code patterns, configurations, or text.\n"
         "  Example: 'function.*async' would find files containing async function definitions.\n\n"
+        "IMPORTANT: Output lines are truncated to 2048 characters. If a line exceeds this limit,\n"
+        "it will be truncated and '...' will be appended to indicate truncation.\n\n"
         "Returns: { matches: string[] } or { error: string }"
     )
 )
@@ -1189,9 +1191,15 @@ def fuzzy_search_files(
                         try:
                             decoded = chunk.decode("utf-8")
                             # In multiline mode, return the full content including filename prefix
+                            # Truncate to 2048 characters if needed
+                            if len(decoded) > 2048:
+                                decoded = decoded[:2048] + "..."
                             matches.append(decoded)
                         except UnicodeDecodeError:
-                            matches.append(chunk.decode("utf-8", errors="replace"))
+                            decoded = chunk.decode("utf-8", errors="replace")
+                            if len(decoded) > 2048:
+                                decoded = decoded[:2048] + "..."
+                            matches.append(decoded)
         else:
             # Standard mode - file paths only
             search_path = str(Path(path).resolve())
@@ -1295,6 +1303,8 @@ def fuzzy_search_files(
         '     fuzzy_filter="def test_ _test.py:" (space separates patterns!)\n'
         '     Finding "def test_" in files containing "test" at end of path:\n'
         '     fuzzy_filter="def test_ /test.py:" (matches src/test.py, lib/test.py)\n\n'
+        "IMPORTANT: Content field is truncated to 2048 characters. If content exceeds this limit,\n"
+        "it will be truncated and '...' will be appended to indicate truncation.\n\n"
         "Returns: { matches: Array<{file: string, line: number, content: string}> } or { error: string }"
     )
 )
@@ -1459,13 +1469,15 @@ def fuzzy_search_content(
                             # Extract filename from first line
                             if ":\n" in decoded:
                                 file_part, content_part = decoded.split(":\n", 1)
+                                content = content_part.strip()
+                                # Truncate content to 2048 characters if needed
+                                if len(content) > 2048:
+                                    content = content[:2048] + "..."
                                 matches.append(
                                     {
                                         "file": file_part.strip(),
                                         "line": 1,  # Multiline records don't have specific line numbers
-                                        "content": content_part.strip()[:200] + "..."
-                                        if len(content_part) > 200
-                                        else content_part.strip(),
+                                        "content": content,
                                     }
                                 )
                         except UnicodeDecodeError:
@@ -1595,10 +1607,14 @@ def fuzzy_search_content(
 
                 if len(parts) >= 3:
                     try:
+                        content = parts[2].strip()
+                        # Truncate content to 2048 characters if needed
+                        if len(content) > 2048:
+                            content = content[:2048] + "..."
                         match = {
                             "file": parts[0],
                             "line": int(parts[1]),
-                            "content": parts[2].strip(),
+                            "content": content,
                         }
                         matches.append(match)
                         if enable_debug:
@@ -1643,6 +1659,8 @@ def fuzzy_search_content(
         "  limit (int, optional): Max results. Default: 20.\n"
         "  confirm_root (bool, optional): Allow searching from root directory (/). Default: false.\n"
         "    Note: Searching from root (/) requires confirm_root=True to prevent accidental slow searches.\n\n"
+        "IMPORTANT: Both 'content' and 'match_text' fields are truncated to 2048 characters.\n"
+        "If either field exceeds this limit, it will be truncated and '...' will be appended.\n\n"
         "Returns: { matches: Array<{file, content, match_text, page?, page_index_0based?, page_label?}> }\n"
         "  - page: Physical page number (1-based) for PDF files\n"
         "  - page_index_0based: Zero-based page index for programmatic access (page - 1)\n"
@@ -1818,6 +1836,12 @@ def fuzzy_search_documents(
                     # Build formatted line for fzf
                     formatted = f"{file_path}:{line_num}:{text}"
                     formatted_lines.append(formatted)
+
+                    # Truncate content and match_text to 2048 characters if needed
+                    if len(content) > 2048:
+                        content = content[:2048] + "..."
+                    if len(match_text) > 2048:
+                        match_text = match_text[:2048] + "..."
 
                     # Store mapping for later reconstruction
                     result_data = {
