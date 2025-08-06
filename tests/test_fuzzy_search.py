@@ -3205,10 +3205,11 @@ def unique_function_name():
         )
 
         # Search in the directory containing the file
+        # Use a simpler filter that works on both Windows and Unix
         result_dir = await client.call_tool(
             "fuzzy_search_content",
             {
-                "fuzzy_filter": "unique_function_name test_consistency.py:",
+                "fuzzy_filter": "unique_function_name",
                 "path": str(tmp_path),
             },
         )
