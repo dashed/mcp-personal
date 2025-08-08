@@ -526,6 +526,118 @@ sys.exit(1)
         assert result["matches"] == []
 
 
+def test_fzf_actual_error_handling(tmp_path: Path):
+    """Test that fzf exit code 2 (actual error) is properly reported as an error."""
+    if platform.system() == "Windows":
+        mock_fd = tmp_path / "fd.bat"
+        mock_fd.write_text("""@echo off
+echo file1.txt
+echo file2.log
+""")
+
+        mock_fzf = tmp_path / "fzf.bat"
+        mock_fzf.write_text("""@echo off
+rem fzf returns exit code 2 for actual errors
+echo Error: fzf encountered an error >&2
+exit /b 2
+""")
+    else:
+        mock_fd = tmp_path / "fd"
+        mock_fd.write_text("""#!/usr/bin/env python3
+import sys
+print("file1.txt")
+print("file2.log")
+sys.exit(0)
+""")
+        mock_fd.chmod(0o755)
+
+        mock_fzf = tmp_path / "fzf"
+        mock_fzf.write_text("""#!/usr/bin/env python3
+import sys
+# fzf returns exit code 2 for actual errors
+print("Error: fzf encountered an error", file=sys.stderr)
+sys.exit(2)
+""")
+        mock_fzf.chmod(0o755)
+
+    with monkeypatch.context() as m:
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        m.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
+
+        # Reload module globals to pick up new executables
+        mcp_fd_server.FD_EXECUTABLE = shutil.which("fd") or shutil.which("fdfind")
+        mcp_fd_server.FZF_EXECUTABLE = shutil.which("fzf")
+
+        result = mcp_fd_server.filter_files("searchterm")
+
+        # Should return an error for exit code 2, not empty matches
+        assert "error" in result
+        assert "matches" not in result
+        # The error should contain information about the subprocess error
+        assert (
+            "CalledProcessError" in result["error"] or "exit" in result["error"].lower()
+        )
+
+
+def test_fzf_actual_error_handling_multiline(tmp_path: Path):
+    """Test that fzf exit code 2 in multiline mode is properly reported as an error."""
+    # Create test files with content
+    test_file1 = tmp_path / "test1.txt"
+    test_file1.write_text("content1")
+    test_file2 = tmp_path / "test2.txt"
+    test_file2.write_text("content2")
+
+    if platform.system() == "Windows":
+        mock_fd = tmp_path / "fd.bat"
+        mock_fd.write_text(f"""@echo off
+echo {test_file1}
+echo {test_file2}
+""")
+
+        mock_fzf = tmp_path / "fzf.bat"
+        mock_fzf.write_text("""@echo off
+rem fzf returns exit code 2 for actual errors in multiline mode
+echo Error: fzf multiline processing failed >&2
+exit /b 2
+""")
+    else:
+        mock_fd = tmp_path / "fd"
+        mock_fd.write_text(f"""#!/usr/bin/env python3
+import sys
+print("{test_file1}")
+print("{test_file2}")
+sys.exit(0)
+""")
+        mock_fd.chmod(0o755)
+
+        mock_fzf = tmp_path / "fzf"
+        mock_fzf.write_text("""#!/usr/bin/env python3
+import sys
+# fzf returns exit code 2 for actual errors in multiline mode
+print("Error: fzf multiline processing failed", file=sys.stderr)
+sys.exit(2)
+""")
+        mock_fzf.chmod(0o755)
+
+    with monkeypatch.context() as m:
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        m.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
+
+        # Reload module globals to pick up new executables
+        mcp_fd_server.FD_EXECUTABLE = shutil.which("fd") or shutil.which("fdfind")
+        mcp_fd_server.FZF_EXECUTABLE = shutil.which("fzf")
+
+        result = mcp_fd_server.filter_files("searchterm", multiline=True)
+
+        # Should return an error for exit code 2 in multiline mode too
+        assert "error" in result
+        assert "matches" not in result
+        # The error should contain information about the subprocess error
+        assert (
+            "CalledProcessError" in result["error"] or "exit" in result["error"].lower()
+        )
+
+
 def test_multiline_support(tmp_path: Path):
     """Test multiline support in filter_files."""
     # Create test files with content
@@ -643,6 +755,7 @@ async def test_filter_files_multiline_mcp():
                 b"test.js:\nfunction example() {\n  return 'hello';\n}\x00",
                 b"",
             )
+            mock_fzf_proc.returncode = 0  # Success
             mock_popen.return_value = mock_fzf_proc
 
             async with client_session(mcp_fd_server.mcp._mcp_server) as client:
@@ -754,6 +867,7 @@ def test_filter_files_limit_trims_results_multiline_mode(tmp_path):
                     for f in files
                 ]
             )
+            self.returncode = 0  # Success
 
         def communicate(self, data):
             # Pretend fzf returned all entries (already contains NULs)

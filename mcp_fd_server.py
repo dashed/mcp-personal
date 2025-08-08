@@ -378,9 +378,21 @@ def filter_files(
             fzf_cmd.extend(shlex.split(fzf_flags))
 
             fzf_proc = subprocess.Popen(
-                fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
+                fzf_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=False,
             )
-            out_bytes, _ = fzf_proc.communicate(multiline_input)
+            out_bytes, err_bytes = fzf_proc.communicate(multiline_input)
+
+            # Check fzf return code and handle errors
+            if fzf_proc.returncode != 0:
+                # Create a CalledProcessError to pass to _handle_fzf_error
+                exc = subprocess.CalledProcessError(
+                    fzf_proc.returncode, fzf_cmd, output=out_bytes, stderr=err_bytes
+                )
+                return _handle_fzf_error(exc, warnings)
 
             # Parse null-separated output
             matches = []
