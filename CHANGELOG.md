@@ -13,6 +13,11 @@
   - Tests for exit code 2 (actual errors) in both standard and multiline modes
   - Ensures proper distinction between "no matches" (exit code 1) and real errors (exit code 2)
   - Fixed bug in multiline mode where fzf return codes weren't being checked
+  - **Fuzzy Search Server Tests**: Added 7 comprehensive tests for FZF exit code handling
+    - Tests for FZF_EXIT_NO_MATCH (exit code 1) in all functions and modes
+    - Tests for FZF_EXIT_ERROR (exit code 2) to verify proper error reporting
+    - Coverage for `fuzzy_search_files`, `fuzzy_search_content`, and `fuzzy_search_documents`
+    - Tests for both standard and multiline operation modes
 
 - **Root Path Validation**: Added safety mechanism to prevent accidental slow searches from root directory
   - Added `confirm_root` parameter (default: false) to `fuzzy_search_files`, `fuzzy_search_content`, and `fuzzy_search_documents`
@@ -80,6 +85,15 @@
   - Added `_handle_fzf_error()` helper function to centralize error handling
   - Applied fix to both standard and multiline modes consistently
   - Enhanced documentation with all fzf exit codes (0, 1, 2, 126, 130)
+- **Fuzzy Search Server fzf Exit Code Handling**: Extended proper fzf exit code handling to fuzzy search server
+  - Added FZF_EXIT_* constants (0, 1, 2, 126, 130) to avoid magic numbers
+  - Implemented `_handle_fzf_error()` helper function for centralized error handling
+  - Updated all functions to properly check fzf return codes:
+    - `fuzzy_search_files` (both standard and multiline modes)
+    - `fuzzy_search_content` (standard, multiline, and debug modes)
+    - `fuzzy_search_documents`
+    - `get_pdf_outline` (with fuzzy filtering)
+  - Ensures consistent behavior where exit code 1 returns empty matches, not errors
 - **Multiline Mode Error Handling**: Fixed bug where multiline mode wasn't checking fzf return codes
   - Added proper return code checking after `communicate()` call
   - Creates appropriate `CalledProcessError` for non-zero exit codes

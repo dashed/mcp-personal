@@ -6,7 +6,14 @@ A collection of [Model Context Protocol](https://modelcontextprotocol.io) (MCP) 
 
 - **Result Limiting**: Added `limit` parameter to `search_files` and `filter_files` for controlling maximum results
 - **Improved Error Handling**: Fixed fzf exit code handling to properly distinguish "no matches" from actual errors
+  - Extended proper fzf exit code handling to fuzzy search server
+  - Added FZF_EXIT_* constants (0, 1, 2, 126, 130) to avoid magic numbers
+  - Implemented centralized error handling across all fuzzy search functions
+  - Exit code 1 now correctly returns empty matches instead of errors
 - **Enhanced Testing**: Added comprehensive test coverage for error conditions and edge cases
+  - Added 7 new tests specifically for FZF exit code handling in fuzzy search server
+  - Tests cover both "no matches" (exit code 1) and actual errors (exit code 2)
+  - Comprehensive coverage for all functions and operation modes
 - **Performance**: `search_files` now uses fd's native `--max-results` flag for better efficiency with limits
 
 ## Available MCP Servers
@@ -27,6 +34,7 @@ Advanced search with both file name and content capabilities using `ripgrep` and
 - **File name fuzzy search** - find files by partial/fuzzy names
 - **Content search** using `ripgrep` to search text within files
 - **Fuzzy filtering** of results using `fzf --filter`
+- **Proper error handling** for fzf exit codes (distinguishes "no matches" from errors)
 - **Two distinct modes**: 
   - `fuzzy_search_files`: Search file NAMES/paths
   - `fuzzy_search_content`: Search file CONTENTS with path+content matching by default
