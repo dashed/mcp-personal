@@ -521,8 +521,9 @@ sys.exit(1)
 
         result = mcp_fd_server.filter_files("nomatch")
 
-        # Should handle empty results gracefully
-        assert "error" in result
+        # Should handle empty results gracefully (fzf exit code 1 = no matches, not error)
+        assert "matches" in result
+        assert result["matches"] == []
 
 
 def test_multiline_support(tmp_path: Path):
