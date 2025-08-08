@@ -180,12 +180,27 @@ def _suggest_fuzzy_terms(regex_pattern: str) -> str:
     return fuzzy
 
 
-def _handle_fzf_error(exc: subprocess.CalledProcessError, warnings: list[str]) -> dict[str, Any]:
-    """Handle fzf CalledProcessError, returning appropriate result dict."""
+def _handle_fzf_error(
+    exc: subprocess.CalledProcessError, warnings: list[str]
+) -> dict[str, Any]:
+    """Handle fzf CalledProcessError, returning appropriate result dict.
+
+    fzf exit codes (from fzf source code):
+    - 0: Success with matches (ExitOk)
+    - 1: No matches found (ExitNoMatch) - NOT an error condition
+    - 2: Error occurred (ExitError)
+    - 126: Special exit for 'become' action (ExitBecome)
+    - 130: User interrupted, e.g., Ctrl+C (ExitInterrupt)
+
+    This function specifically handles the case where fzf exits with code 1,
+    which indicates no matches were found but is not an error condition.
+    """
     # fzf returns exit code 1 when no matches found - this is not an error
     if exc.returncode == 1:
         return {"matches": []}  # No matches found, return empty list
 
+    # All other non-zero exit codes are treated as errors
+    # This includes exit code 2 (actual error) and 130 (user interrupt)
     error_result: dict[str, Any] = {"error": str(exc)}
     if warnings:
         error_result["warnings"] = warnings
