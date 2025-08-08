@@ -199,6 +199,7 @@ mcp = FastMCP("fd-fzf")
         "Args:\n"
         "  pattern (str): Regex or glob pattern to match filenames. Required.\n"
         "  path    (str, optional): Directory to search in. Defaults to current dir.\n"
+        "  limit   (int, optional): Maximum number of results to return. Default 0 (no limit).\n"
         "  flags   (str, optional): Extra flags for fd (e.g., '--hidden' for hidden files).\n\n"
         "Examples:\n"
         "  pattern='\\.py$' - Find all Python files\n"
@@ -210,6 +211,7 @@ mcp = FastMCP("fd-fzf")
 def search_files(
     pattern: str,
     path: str = ".",
+    limit: int = 0,
     flags: str = "",
 ) -> dict[str, Any]:
     """Return every file or directory matching *pattern* according to fd."""
@@ -226,6 +228,8 @@ def search_files(
     try:
         out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
         matches = [_normalize_path(p) for p in out.splitlines() if p]
+        if limit > 0:
+            matches = matches[:limit]
         return {"matches": matches}
     except subprocess.CalledProcessError as exc:
         return {"error": exc.output.strip() or str(exc)}
@@ -247,6 +251,7 @@ def search_files(
         "  pattern (str, optional): Pre-filter with fd pattern (empty = all files).\n"
         "  path    (str, optional): Directory to search. Defaults to current dir.\n"
         "  first   (bool, optional): Return only the best match. Default false.\n"
+        "  limit   (int, optional): Maximum number of results to return. Default 0 (no limit).\n"
         "  fd_flags  (str, optional): Extra flags for fd.\n"
         "  fzf_flags (str, optional): Extra flags for fzf.\n"
         "  multiline (bool, optional): Search file CONTENTS (not just names). Default false.\n\n"
@@ -283,6 +288,7 @@ def filter_files(
     pattern: str = "",
     path: str = ".",
     first: bool = False,
+    limit: int = 0,
     fd_flags: str = "",
     fzf_flags: str = "",
     multiline: bool = False,
@@ -381,6 +387,8 @@ def filter_files(
 
     if first and matches:
         matches = matches[:1]
+    elif limit > 0 and matches:
+        matches = matches[:limit]
 
     result = {"matches": matches}
     if warnings:
@@ -405,6 +413,7 @@ def _cli() -> None:
     p_search = sub.add_parser("search", help="fd search")
     p_search.add_argument("pattern")
     p_search.add_argument("path", nargs="?", default=".")
+    p_search.add_argument("--limit", type=int, default=0, help="Maximum results")
     p_search.add_argument("--flags", default="")
 
     # filter_files sub‑command
@@ -415,6 +424,7 @@ def _cli() -> None:
     p_filter.add_argument("pattern", nargs="?", default="")
     p_filter.add_argument("path", nargs="?", default=".")
     p_filter.add_argument("--first", action="store_true")
+    p_filter.add_argument("--limit", type=int, default=0, help="Maximum results")
     p_filter.add_argument("--fd-flags", default="")
     p_filter.add_argument("--fzf-flags", default="")
     p_filter.add_argument(
@@ -424,13 +434,14 @@ def _cli() -> None:
     ns = parser.parse_args()
 
     if ns.cmd == "search":
-        res = search_files(ns.pattern, ns.path, ns.flags)
+        res = search_files(ns.pattern, ns.path, ns.limit, ns.flags)
     else:
         res = filter_files(
             ns.filter,
             ns.pattern,
             ns.path,
             ns.first,
+            ns.limit,
             ns.fd_flags,
             ns.fzf_flags,
             ns.multiline,

@@ -682,6 +682,7 @@ Find files by NAME using fd with regex or glob patterns.
 **Parameters:**
 - `pattern` (required): Regex or glob pattern to match file names
 - `path` (optional): Directory to search in (defaults to current directory)
+- `limit` (optional): Maximum number of results to return (default: 0 = no limit)
 - `flags` (optional): Additional flags to pass to fd
 
 **Example:**
@@ -703,6 +704,7 @@ Fuzzy search for files by NAME using fzf's fuzzy matching.
 - `pattern` (optional): Initial pattern for fd to pre-filter
 - `path` (optional): Directory to search in
 - `first` (optional): Return only the best match
+- `limit` (optional): Maximum number of results to return (default: 0 = no limit)
 - `fd_flags` (optional): Extra flags for fd
 - `fzf_flags` (optional): Extra flags for fzf
 - `multiline` (optional): When true, searches file CONTENTS instead of names (default: false)
