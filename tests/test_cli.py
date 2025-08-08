@@ -207,6 +207,53 @@ for line in data[:3]:
     assert len(output["matches"]) == 2
 
 
+def test_cli_filter_first_overrides_limit_mocked(tmp_path: Path, monkeypatch):
+    """CLI filter should return a single match when both --first and --limit are set."""
+    if platform.system() == "Windows":
+        pytest.skip("shebang-based mock not portable on Windows")
+
+    # Create mock fd and fzf executables
+    mock_fd = tmp_path / "fd"
+    mock_fd.write_text("""#!/usr/bin/env python3
+print("one")
+print("two")
+print("three")
+""")
+    mock_fd.chmod(0o755)
+
+    mock_fzf = tmp_path / "fzf"
+    mock_fzf.write_text("""#!/usr/bin/env python3
+import sys
+data = sys.stdin.read().splitlines()
+for line in data[:3]:
+    print(line)
+""")
+    mock_fzf.chmod(0o755)
+
+    path_sep = ":"
+    monkeypatch.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "mcp_fd_server.py",
+            "filter",
+            "o",
+            "",
+            ".",
+            "--first",
+            "--limit=5",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert "matches" in output
+    assert len(output["matches"]) == 1
+
+
 def test_mcp_server_mode():
     """Test that script runs in MCP server mode without arguments."""
     # Start the server

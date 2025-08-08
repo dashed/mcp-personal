@@ -696,9 +696,36 @@ def test_search_files_windows_path_output():
             assert result["matches"][2] == "//network/share/script.py"
 
             # No backslashes should remain
-        for match in result["matches"]:
-            assert "\\" not in match
+    for match in result["matches"]:
+        assert "\\" not in match
 
+
+def test_filter_files_first_overrides_limit_standard_mode():
+    """first=True should override limit and return exactly one match in standard mode."""
+
+    class _MockPopen:
+        def __init__(self, *args, **kwargs):
+            self.stdout = None
+
+        def wait(self):
+            return 0
+
+    def fake_check_output(cmd, *args, **kwargs):  # fzf output or fd list
+        # If command looks like fzf (contains '--filter'), return multiple matches
+        if isinstance(cmd, list) and "--filter" in cmd:
+            return "alpha\nbeta\ngamma\n"
+        # Else return dummy fd listing
+        return "alpha\nbeta\ngamma\n"
+
+    with (
+        patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
+        patch.object(mcp_fd_server, "FZF_EXECUTABLE", "/mock/fzf"),
+        patch("subprocess.Popen", side_effect=_MockPopen),
+        patch("subprocess.check_output", side_effect=fake_check_output),
+    ):
+        res = mcp_fd_server.filter_files("a", pattern="", path=".", first=True, limit=5)
+        assert "matches" in res
+        assert len(res["matches"]) == 1
 
 
 def test_filter_files_limit_trims_results_multiline_mode(tmp_path):
