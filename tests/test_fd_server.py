@@ -696,8 +696,50 @@ def test_search_files_windows_path_output():
             assert result["matches"][2] == "//network/share/script.py"
 
             # No backslashes should remain
-    for match in result["matches"]:
-        assert "\\" not in match
+        for match in result["matches"]:
+            assert "\\" not in match
+
+
+
+def test_filter_files_limit_trims_results_multiline_mode(tmp_path):
+    """In multiline mode, limit should trim results when first is not set."""
+    # Prepare a couple of files and contents
+    files = []
+    for i, content in enumerate(
+        [b"function a(){}", b"function b(){}", b"function c(){}"], start=1
+    ):
+        p = tmp_path / f"f{i}.js"
+        p.write_bytes(content)
+        files.append(str(p))
+
+    # Mock fd to list our files, and fzf to pass them through when filtering 'function'
+    def fake_fd_output(cmd, *args, **kwargs):
+        return "\n".join(files) + "\n"
+
+    class _MockFzfProc:
+        def __init__(self, *args, **kwargs):
+            self._out = b"".join(
+                [
+                    f"{mcp_fd_server._normalize_path(f)}:\n".encode()
+                    + open(f, "rb").read()
+                    + b"\0"
+                    for f in files
+                ]
+            )
+
+        def communicate(self, data):
+            # Pretend fzf returned all entries (already contains NULs)
+            return self._out, b""
+
+    with (
+        patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
+        patch.object(mcp_fd_server, "FZF_EXECUTABLE", "/mock/fzf"),
+        patch("subprocess.check_output", side_effect=fake_fd_output),
+        patch("subprocess.Popen", side_effect=_MockFzfProc),
+    ):
+        res = mcp_fd_server.filter_files("function", multiline=True, limit=2)
+        assert "matches" in res
+        assert len(res["matches"]) == 2
 
 
 def test_search_files_limit_uses_fd_max_results_and_trims():
