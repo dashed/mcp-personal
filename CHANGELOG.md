@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Added
+- **Limit Parameter Support**: Added `limit` parameter to `search_files` and `filter_files` functions
+  - Allows restricting the maximum number of results returned
+  - `search_files` uses fd's native `--max-results` flag for efficiency
+  - `filter_files` applies limit after fuzzy matching (respects `first` parameter precedence)
+  - Available in both MCP tool interface and CLI with `--limit` flag
+  - CLI commands support `--limit` for both search and filter operations
+- **Error Handling Tests**: Added comprehensive test coverage for fzf exit codes
+  - Tests for exit code 2 (actual errors) in both standard and multiline modes
+  - Ensures proper distinction between "no matches" (exit code 1) and real errors (exit code 2)
+  - Fixed bug in multiline mode where fzf return codes weren't being checked
+
 - **Root Path Validation**: Added safety mechanism to prevent accidental slow searches from root directory
   - Added `confirm_root` parameter (default: false) to `fuzzy_search_files`, `fuzzy_search_content`, and `fuzzy_search_documents`
   - Functions now check if search path resolves to root directory ("/" on Unix-like systems, drive root on Windows)
@@ -49,6 +60,9 @@
   - Added `ty>=0.0.1a16` as dev dependency
 
 ### Changed
+- **Test Coverage**: Improved test suite with better mock objects
+  - Added `returncode` attribute to mock fzf process objects
+  - Enhanced multiline mode test mocks for proper subprocess simulation
 - **PDF Processing Migration**: Replaced pdfminer.six with PyMuPDF (fitz) for all PDF operations
   - Better performance and native page label support
   - Simplified implementation with PyMuPDF's high-level APIs
@@ -61,6 +75,14 @@
   - Page number is available as `page` (1-based), `page_index_0based` (0-based), and `page_label` (PDF label)
 
 ### Fixed
+- **fzf Exit Code Handling**: Fixed incorrect treatment of fzf exit code 1 as an error (PR #2)
+  - Exit code 1 now correctly returns empty matches instead of an error
+  - Added `_handle_fzf_error()` helper function to centralize error handling
+  - Applied fix to both standard and multiline modes consistently
+  - Enhanced documentation with all fzf exit codes (0, 1, 2, 126, 130)
+- **Multiline Mode Error Handling**: Fixed bug where multiline mode wasn't checking fzf return codes
+  - Added proper return code checking after `communicate()` call
+  - Creates appropriate `CalledProcessError` for non-zero exit codes
 - **File Path Handling in Content Search**: Fixed `fuzzy_search_content` to properly handle single file paths
   - Added `--with-filename` flag when searching a single file to ensure consistent output format
   - Previously returned empty results when given a file path instead of directory because ripgrep doesn't include filenames by default when searching single files

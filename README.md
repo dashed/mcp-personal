@@ -2,6 +2,13 @@
 
 A collection of [Model Context Protocol](https://modelcontextprotocol.io) (MCP) servers for various personal productivity tools and utilities.
 
+## Recent Updates (January 2025)
+
+- **Result Limiting**: Added `limit` parameter to `search_files` and `filter_files` for controlling maximum results
+- **Improved Error Handling**: Fixed fzf exit code handling to properly distinguish "no matches" from actual errors
+- **Enhanced Testing**: Added comprehensive test coverage for error conditions and edge cases
+- **Performance**: `search_files` now uses fd's native `--max-results` flag for better efficiency with limits
+
 ## Available MCP Servers
 
 ### 1. File Search Server (`mcp_fd_server.py`)
@@ -9,6 +16,8 @@ Fuzzy file NAME search capabilities using `fd` and `fzf`:
 - **Fast file name search** using `fd` (searches file names/paths, NOT contents)
 - **Fuzzy filtering of file names** with `fzf` for intelligent name matching
 - **Pattern matching** with regex and glob support for file names
+- **Result limiting** with `limit` parameter to restrict number of matches
+- **Proper error handling** for fzf exit codes (distinguishes "no matches" from errors)
 - **Multiline mode** (advanced): can also search file contents when enabled
 - **Standalone CLI** for testing and direct usage
 - **Key point**: Primary purpose is finding files by NAME, not searching contents
@@ -309,18 +318,21 @@ The file search server also works as a standalone CLI tool:
 ```bash
 # Search for files by name pattern
 ./mcp_fd_server.py search "\.py$" /path/to/search  # Find Python files by name
+./mcp_fd_server.py search "\.py$" . --limit 10  # Limit to first 10 results
 
 # Search with additional fd flags
 ./mcp_fd_server.py search "\.js$" . --flags "--hidden --no-ignore"
 
 # Fuzzy filter file names/paths
 ./mcp_fd_server.py filter "main" "\.py$" /path/to/search  # Fuzzy search for 'main' in Python file names
+./mcp_fd_server.py filter "test" "" . --limit 20  # Find up to 20 test-related files
 
 # Get the best fuzzy match by name
 ./mcp_fd_server.py filter "app" "" . --first  # Find file with name most similar to 'app'
 
 # Multiline mode - search file CONTENTS (not just names)
 ./mcp_fd_server.py filter "class function" "" src --multiline  # Find files containing both terms
+./mcp_fd_server.py filter "TODO" "" . --multiline --limit 5  # Find first 5 files with TODOs
 ```
 
 ### Fuzzy Search Server
