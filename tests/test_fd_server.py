@@ -696,5 +696,74 @@ def test_search_files_windows_path_output():
             assert result["matches"][2] == "//network/share/script.py"
 
             # No backslashes should remain
-            for match in result["matches"]:
-                assert "\\" not in match
+    for match in result["matches"]:
+        assert "\\" not in match
+
+
+def test_search_files_limit_uses_fd_max_results_and_trims():
+    """search_files should add '-n <limit>' to fd and trim results as a safety."""
+    captured_cmds = []
+
+    def fake_check_output(cmd, *args, **kwargs):  # type: ignore[no-redef]
+        # Record the command to inspect flags
+        captured_cmds.append(cmd if isinstance(cmd, list) else [cmd])
+        # Always return 3 lines
+        return "a\nB\nc\n"
+
+    with (
+        patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
+        patch("subprocess.check_output", side_effect=fake_check_output),
+    ):
+        # With limit=2, ensure '--max-results 2' is present and result trimmed to 2
+        res = mcp_fd_server.search_files(".*", ".", limit=2)
+        assert "matches" in res
+        assert len(res["matches"]) == 2
+        # Verify the first recorded cmd includes --max-results 2
+        assert any(
+            isinstance(cmd, list) and "--max-results" in cmd and str(2) in cmd
+            for cmd in captured_cmds
+        )
+
+    # No limit should not include -n
+    captured_cmds.clear()
+    with (
+        patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
+        patch("subprocess.check_output", side_effect=fake_check_output),
+    ):
+        res = mcp_fd_server.search_files(".*", ".", limit=0)
+        assert "matches" in res
+        assert len(res["matches"]) == 3
+        assert all(
+            "--max-results" not in (cmd if isinstance(cmd, list) else [cmd])
+            for cmd in captured_cmds
+        )
+
+
+def test_filter_files_limit_trims_results_standard_mode():
+    """filter_files should trim to 'limit' when not using 'first' (standard mode)."""
+
+    class _MockPopen:
+        def __init__(self, *args, **kwargs):
+            self.stdout = None
+
+        def wait(self):
+            return 0
+
+    def fake_check_output(cmd, *args, **kwargs):  # fzf output or fd list
+        # If command looks like fzf (contains '--filter'), return three matches
+        if isinstance(cmd, list) and "--filter" in cmd:
+            return "x\ny\nz\n"
+        # Else return dummy fd listing
+        return "x\ny\nz\n"
+
+    with (
+        patch.object(mcp_fd_server, "FD_EXECUTABLE", "/mock/fd"),
+        patch.object(mcp_fd_server, "FZF_EXECUTABLE", "/mock/fzf"),
+        patch("subprocess.Popen", side_effect=_MockPopen),
+        patch("subprocess.check_output", side_effect=fake_check_output),
+    ):
+        res = mcp_fd_server.filter_files(
+            "term", pattern="", path=".", first=False, limit=2
+        )
+        assert "matches" in res
+        assert len(res["matches"]) == 2

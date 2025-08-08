@@ -709,6 +709,8 @@ Fuzzy search for files by NAME using fzf's fuzzy matching.
 - `fzf_flags` (optional): Extra flags for fzf
 - `multiline` (optional): When true, searches file CONTENTS instead of names (default: false)
 
+Note: When both `first` and `limit` are provided, `first` takes precedence and returns only the best match.
+
 **Example (File Name Search):**
 ```python
 {

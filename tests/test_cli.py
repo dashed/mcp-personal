@@ -125,6 +125,88 @@ if "--hidden" in sys.argv:
     assert "src/.hidden/config.py" in output["matches"]
 
 
+def test_cli_search_limit_mocked(tmp_path: Path, monkeypatch):
+    """CLI search should honor --limit and cap results."""
+    if platform.system() == "Windows":
+        pytest.skip("shebang-based mock not portable on Windows")
+
+    # Mock fd to return multiple results
+    mock_fd = tmp_path / "fd"
+    mock_fd.write_text("""#!/usr/bin/env python3
+print("a")
+print("b")
+print("c")
+""")
+    mock_fd.chmod(0o755)
+
+    path_sep = ":"
+    monkeypatch.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "mcp_fd_server.py",
+            "search",
+            r".*",
+            ".",
+            "--limit=2",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert "matches" in output
+    assert len(output["matches"]) == 2
+
+
+def test_cli_filter_limit_mocked(tmp_path: Path, monkeypatch):
+    """CLI filter should honor --limit in standard mode (no multiline)."""
+    if platform.system() == "Windows":
+        pytest.skip("shebang-based mock not portable on Windows")
+
+    # Create mock fd and fzf executables
+    mock_fd = tmp_path / "fd"
+    mock_fd.write_text("""#!/usr/bin/env python3
+print("one")
+print("two")
+print("three")
+""")
+    mock_fd.chmod(0o755)
+
+    mock_fzf = tmp_path / "fzf"
+    mock_fzf.write_text("""#!/usr/bin/env python3
+import sys
+data = sys.stdin.read().splitlines()
+for line in data[:3]:
+    print(line)
+""")
+    mock_fzf.chmod(0o755)
+
+    path_sep = ":"
+    monkeypatch.setenv("PATH", f"{tmp_path}{path_sep}{os.environ.get('PATH', '')}")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "mcp_fd_server.py",
+            "filter",
+            "o",
+            "",
+            ".",
+            "--limit=2",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    output = json.loads(result.stdout)
+    assert "matches" in output
+    assert len(output["matches"]) == 2
+
+
 def test_mcp_server_mode():
     """Test that script runs in MCP server mode without arguments."""
     # Start the server

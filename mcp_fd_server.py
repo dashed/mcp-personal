@@ -221,14 +221,18 @@ def search_files(
     fd_bin = _require(FD_EXECUTABLE, "fd")
     # Ensure path is properly formatted
     search_path = str(Path(path).resolve())
-    cmd: list[str] = [fd_bin, *shlex.split(flags), pattern, search_path]
+    cmd: list[str] = [fd_bin]
+    if isinstance(limit, int) and limit > 0:
+        # Use fd's native max-results for efficiency
+        cmd += ["--max-results", str(limit)]
+    cmd += [*shlex.split(flags), pattern, search_path]
 
     logger.debug("Running fd: %s", " ".join(shlex.quote(c) for c in cmd))
 
     try:
         out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
         matches = [_normalize_path(p) for p in out.splitlines() if p]
-        if limit > 0:
+        if isinstance(limit, int) and limit > 0:
             matches = matches[:limit]
         return {"matches": matches}
     except subprocess.CalledProcessError as exc:
