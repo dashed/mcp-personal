@@ -259,6 +259,7 @@ def search_files(
         "  fd_flags  (str, optional): Extra flags for fd.\n"
         "  fzf_flags (str, optional): Extra flags for fzf.\n"
         "  multiline (bool, optional): Search file CONTENTS (not just names). Default false.\n\n"
+        "Note: When both 'first' and 'limit' are set, 'first' takes precedence and returns only the best match.\n\n"
         "FUZZY FILE NAME MATCHING:\n"
         "  'mainpy' → Finds: main.py, main_py.txt, domain.py, etc.\n"
         "  'confjs' → Finds: config.js, conf.js, configure.js, etc.\n"
