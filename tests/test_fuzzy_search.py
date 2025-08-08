@@ -524,6 +524,7 @@ async def test_fuzzy_search_files_mocked(mock_popen):
     # Mock fzf process
     fzf_proc = MagicMock()
     fzf_proc.communicate.return_value = ("src/main.py\nsrc/main_test.py\n", "")
+    fzf_proc.returncode = 0
 
     mock_popen.side_effect = [rg_proc, fzf_proc]
 
@@ -558,6 +559,7 @@ async def test_fuzzy_search_content_mocked(mock_popen):
         "src/test.py:5:    # TODO: implement tests\n",
         "",
     )
+    fzf_proc.returncode = 0
 
     mock_popen.side_effect = [rg_proc, fzf_proc]
 
@@ -599,6 +601,7 @@ async def test_fuzzy_search_content_mocked_content_only(mock_popen):
         "src/sync.py:1:async def fetch():\n",
         "",
     )
+    fzf_proc.returncode = 0
 
     mock_popen.side_effect = [rg_proc, fzf_proc]
 
@@ -712,6 +715,7 @@ def process_request():
         normalized_path = normalize_path(str(test_file1))
         expected_output = f"{normalized_path}:\nclass UserService:\n    def authenticate(self, user):\n        if user.is_valid:\n            return True\n        return False\n\ndef process_request():\n    pass\n\x00"
         mock_fzf_proc.communicate.return_value = (expected_output.encode(), b"")
+        mock_fzf_proc.returncode = 0
         mock_popen.return_value = mock_fzf_proc
 
         result = mcp_fuzzy_search.fuzzy_search_content(
@@ -805,6 +809,7 @@ async def test_fuzzy_search_files_multiline_mcp():
                 b"api.js:\nasync function processData() {\n  const result = await fetch('/api');\n  return result.json();\n}\x00",
                 b"",
             )
+            mock_fzf_proc.returncode = 0
             mock_popen.return_value = mock_fzf_proc
 
             async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
@@ -856,6 +861,7 @@ async def test_fuzzy_search_content_multiline_mcp():
                 b"service.js:\nclass DatabaseService {\n  constructor(config) {\n    this.config = config;\n  }\n\n  async connect() {\n    // TODO: implement\n  }\n}\x00",
                 b"",
             )
+            mock_fzf_proc.returncode = 0
             mock_popen.return_value = mock_fzf_proc
 
             async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
@@ -931,6 +937,7 @@ def test_fuzzy_search_content_windows_paths():
                         b"C:/Users/test/app.py:\nclass Application:\n    def run(self):\n        pass\x00",
                         b"",
                     )
+                    mock_proc.returncode = 0
                     mock_popen.return_value = mock_proc
 
                     # Mock file reading
@@ -1019,6 +1026,7 @@ async def test_fuzzy_search_documents_basic(tmp_path: Path):
             f"{test_pdf}:0:Page 1: This is test content",
             None,
         )
+        mock_fzf_proc.returncode = 0
 
         # Configure mocks for subprocess.Popen
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
@@ -1142,6 +1150,7 @@ async def test_fuzzy_search_documents_with_page_labels(tmp_path: Path):
             f"{test_pdf}:0:Page 1: Introduction to concepts\n{test_pdf}:0:Page 5: Chapter 1 begins\n{test_pdf}:0:Page 10: Table of contents",
             None,
         )
+        mock_fzf_proc.returncode = 0
 
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 
@@ -1344,6 +1353,7 @@ async def test_fuzzy_search_documents_with_file_types(tmp_path: Path):
 
         mock_fzf_proc = MagicMock()
         mock_fzf_proc.communicate.return_value = ("", None)
+        mock_fzf_proc.returncode = 0
 
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 
@@ -1391,6 +1401,7 @@ async def test_fuzzy_search_documents_preview_false(tmp_path: Path):
 
         mock_fzf_proc = MagicMock()
         mock_fzf_proc.communicate.return_value = ("", None)
+        mock_fzf_proc.returncode = 0
 
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 
@@ -3022,6 +3033,7 @@ async def test_fuzzy_search_files_root_path_with_confirm():
         # Mock the second Popen call for fzf
         fzf_proc = MagicMock()
         fzf_proc.communicate.return_value = ("test.txt\n", None)
+        fzf_proc.returncode = 0
         mock_popen.side_effect = [mock_proc, fzf_proc]
 
         async with client_session(mcp_fuzzy_search.mcp._mcp_server) as client:
@@ -3066,6 +3078,7 @@ async def test_fuzzy_search_content_root_path_with_confirm():
 
         mock_fzf_proc = MagicMock()
         mock_fzf_proc.communicate.return_value = ("/test.txt:1:test content\n", None)
+        mock_fzf_proc.returncode = 0
 
         mock_popen.side_effect = [mock_rg_proc, mock_fzf_proc]
 
@@ -3116,6 +3129,7 @@ async def test_fuzzy_search_documents_root_path_with_confirm():
         # Mock fzf process
         mock_fzf_proc = MagicMock()
         mock_fzf_proc.communicate.return_value = ("/test.pdf:1:test\n", None)
+        mock_fzf_proc.returncode = 0
 
         mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
 

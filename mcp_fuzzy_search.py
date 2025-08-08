@@ -130,6 +130,13 @@ FZF_EXECUTABLE = shutil.which("fzf")
 RGA_EXECUTABLE = shutil.which("rga")
 PANDOC_EXECUTABLE = shutil.which("pandoc")
 
+# fzf exit codes (based on fzf source code constants)
+FZF_EXIT_OK = 0  # Success with matches
+FZF_EXIT_NO_MATCH = 1  # No matches found (NOT an error condition)
+FZF_EXIT_ERROR = 2  # Error occurred
+FZF_EXIT_BECOME = 126  # Special exit for 'become' action
+FZF_EXIT_INTERRUPT = 130  # User interrupted (e.g., Ctrl+C)
+
 # Logger
 logger = logging.getLogger(__name__)
 
@@ -145,6 +152,28 @@ def _require(exe: str | None, name: str) -> str:
     if not exe:
         raise RuntimeError(f"{name} not found. Please install it first.")
     return exe
+
+
+def _handle_fzf_error(exc: subprocess.CalledProcessError) -> dict[str, Any]:
+    """Handle fzf CalledProcessError, returning appropriate result dict.
+
+    fzf exit codes (from fzf source code):
+    - 0: Success with matches (FZF_EXIT_OK)
+    - 1: No matches found (FZF_EXIT_NO_MATCH) - NOT an error condition
+    - 2: Error occurred (FZF_EXIT_ERROR)
+    - 126: Special exit for 'become' action (FZF_EXIT_BECOME)
+    - 130: User interrupted, e.g., Ctrl+C (FZF_EXIT_INTERRUPT)
+
+    This function specifically handles the case where fzf exits with code 1,
+    which indicates no matches were found but is not an error condition.
+    """
+    # fzf returns exit code 1 when no matches found - this is not an error
+    if exc.returncode == FZF_EXIT_NO_MATCH:
+        return {"matches": []}  # No matches found, return empty list
+
+    # All other non-zero exit codes are treated as errors
+    # This includes FZF_EXIT_ERROR (actual error) and FZF_EXIT_INTERRUPT (user interrupt)
+    return {"error": str(exc)}
 
 
 def _get_page_label(doc, page_idx: int) -> str:
@@ -1015,16 +1044,31 @@ def get_pdf_outline(
                 check=False,
             )
 
-            # Parse filtered results
-            filtered_outline = []
-            if fzf_proc.returncode == 0 and fzf_proc.stdout:
-                for line in fzf_proc.stdout.strip().split("\n"):
-                    if line:
-                        try:
-                            idx = int(line.split(":", 1)[0])
-                            filtered_outline.append(outline_list[idx])
-                        except (ValueError, IndexError):
-                            continue
+            # Check fzf return code and handle errors
+            if fzf_proc.returncode != 0:
+                exc = subprocess.CalledProcessError(
+                    fzf_proc.returncode,
+                    fzf_cmd,
+                    output=fzf_proc.stdout,
+                    stderr=fzf_proc.stderr,
+                )
+                result = _handle_fzf_error(exc)
+                # If it's an error (not just no matches), return it
+                if "error" in result:
+                    return result
+                # Otherwise, no matches found
+                filtered_outline = []
+            else:
+                # Parse filtered results
+                filtered_outline = []
+                if fzf_proc.stdout:
+                    for line in fzf_proc.stdout.strip().split("\n"):
+                        if line:
+                            try:
+                                idx = int(line.split(":", 1)[0])
+                                filtered_outline.append(outline_list[idx])
+                            except (ValueError, IndexError):
+                                continue
 
             # Return filtered results
             return {
@@ -1181,7 +1225,14 @@ def fuzzy_search_files(
             fzf_proc = subprocess.Popen(
                 fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
             )
-            out_bytes, _ = fzf_proc.communicate(multiline_input)
+            out_bytes, err_bytes = fzf_proc.communicate(multiline_input)
+
+            # Check fzf return code and handle errors
+            if fzf_proc.returncode != 0:
+                exc = subprocess.CalledProcessError(
+                    fzf_proc.returncode, fzf_cmd, output=out_bytes, stderr=err_bytes
+                )
+                return _handle_fzf_error(exc)
 
             # Parse null-separated output
             matches = []
@@ -1217,13 +1268,24 @@ def fuzzy_search_files(
                 rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             fzf_proc = subprocess.Popen(
-                fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
+                fzf_cmd,
+                stdin=rg_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
             if rg_proc.stdout:
                 rg_proc.stdout.close()
 
-            out, _ = fzf_proc.communicate()
+            out, err = fzf_proc.communicate()
             rg_proc.wait()
+
+            # Check fzf return code and handle errors
+            if fzf_proc.returncode != 0:
+                exc = subprocess.CalledProcessError(
+                    fzf_proc.returncode, fzf_cmd, output=out, stderr=err
+                )
+                return _handle_fzf_error(exc)
 
             matches = [p for p in out.splitlines() if p]
 
@@ -1455,9 +1517,20 @@ def fuzzy_search_content(
             ]
 
             fzf_proc = subprocess.Popen(
-                fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=False
+                fzf_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=False,
             )
-            out_bytes, _ = fzf_proc.communicate(multiline_input)
+            out_bytes, err_bytes = fzf_proc.communicate(multiline_input)
+
+            # Check fzf return code and handle errors
+            if fzf_proc.returncode != 0:
+                exc = subprocess.CalledProcessError(
+                    fzf_proc.returncode, fzf_cmd, output=out_bytes, stderr=err_bytes
+                )
+                return _handle_fzf_error(exc)
 
             # Parse multiline results - return as file records
             matches = []
@@ -1554,6 +1627,16 @@ def fuzzy_search_content(
                 if fzf_proc.stdout:
                     logger.debug("Fzf stdout sample: %r", fzf_proc.stdout[:200])
 
+                # Check fzf return code and handle errors
+                if fzf_proc.returncode != 0:
+                    exc = subprocess.CalledProcessError(
+                        fzf_proc.returncode,
+                        fzf_cmd,
+                        output=fzf_proc.stdout,
+                        stderr=fzf_proc.stderr,
+                    )
+                    return _handle_fzf_error(exc)
+
                 out = fzf_proc.stdout
             else:
                 # Locally, use subprocess.Popen for test compatibility
@@ -1561,12 +1644,16 @@ def fuzzy_search_content(
                     rg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
                 )
                 fzf_proc = subprocess.Popen(
-                    fzf_cmd, stdin=rg_proc.stdout, stdout=subprocess.PIPE, text=True
+                    fzf_cmd,
+                    stdin=rg_proc.stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
                 )
                 if rg_proc.stdout:
                     rg_proc.stdout.close()
 
-                out, _ = fzf_proc.communicate()
+                out, err = fzf_proc.communicate()
                 rg_stderr = rg_proc.stderr.read().decode() if rg_proc.stderr else ""
                 rg_proc.wait()
 
@@ -1577,6 +1664,13 @@ def fuzzy_search_content(
                         "error": rg_stderr.strip()
                         or f"ripgrep failed with code {rg_proc.returncode}"
                     }
+
+                # Check fzf return code and handle errors
+                if fzf_proc.returncode != 0:
+                    exc = subprocess.CalledProcessError(
+                        fzf_proc.returncode, fzf_cmd, output=out, stderr=err
+                    )
+                    return _handle_fzf_error(exc)
 
             # Parse results
             matches = []
@@ -1875,9 +1969,20 @@ def fuzzy_search_documents(
         fzf_cmd = [fzf_bin, "--filter", fuzzy_filter]
 
         fzf_proc = subprocess.Popen(
-            fzf_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+            fzf_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        out, _ = fzf_proc.communicate(fzf_input)
+        out, err = fzf_proc.communicate(fzf_input)
+
+        # Check fzf return code and handle errors
+        if fzf_proc.returncode != 0:
+            exc = subprocess.CalledProcessError(
+                fzf_proc.returncode, fzf_cmd, output=out, stderr=err
+            )
+            return _handle_fzf_error(exc)
 
         # Build results from filtered lines
         matches = []
