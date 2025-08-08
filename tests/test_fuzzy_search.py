@@ -974,22 +974,26 @@ def test_fuzzy_search_files_fzf_no_match():
                 with patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"):
                     # Mock rg listing files
                     mock_rg_output.return_value = "file1.py\nfile2.py\nfile3.py\n"
-                    
+
                     # Mock fzf process returning FZF_EXIT_NO_MATCH
                     mock_fzf_proc = MagicMock()
                     mock_fzf_proc.communicate.return_value = ("", "")
-                    mock_fzf_proc.returncode = mcp_fuzzy_search.FZF_EXIT_NO_MATCH  # Exit code 1
-                    
+                    mock_fzf_proc.returncode = (
+                        mcp_fuzzy_search.FZF_EXIT_NO_MATCH
+                    )  # Exit code 1
+
                     # Mock rg process
                     mock_rg_proc = MagicMock()
                     mock_rg_proc.stdout = MagicMock()
                     mock_rg_proc.wait.return_value = 0
-                    
+
                     mock_popen.side_effect = [mock_rg_proc, mock_fzf_proc]
-                    
+
                     # Call the function
-                    result = mcp_fuzzy_search.fuzzy_search_files("nonexistent_pattern", ".")
-                    
+                    result = mcp_fuzzy_search.fuzzy_search_files(
+                        "nonexistent_pattern", "."
+                    )
+
                     # Should return empty matches, not an error
                     assert "matches" in result
                     assert result["matches"] == []
@@ -1008,17 +1012,21 @@ def test_fuzzy_search_content_fzf_no_match():
                 mock_rg_proc.stderr.read.return_value = b""
                 mock_rg_proc.wait.return_value = 0
                 mock_rg_proc.returncode = 0
-                
+
                 # Mock fzf process returning FZF_EXIT_NO_MATCH
                 mock_fzf_proc = MagicMock()
                 mock_fzf_proc.communicate.return_value = ("", "")
-                mock_fzf_proc.returncode = mcp_fuzzy_search.FZF_EXIT_NO_MATCH  # Exit code 1
-                
+                mock_fzf_proc.returncode = (
+                    mcp_fuzzy_search.FZF_EXIT_NO_MATCH
+                )  # Exit code 1
+
                 mock_popen.side_effect = [mock_rg_proc, mock_fzf_proc]
-                
+
                 # Call the function
-                result = mcp_fuzzy_search.fuzzy_search_content("nonexistent_pattern", ".")
-                
+                result = mcp_fuzzy_search.fuzzy_search_content(
+                    "nonexistent_pattern", "."
+                )
+
                 # Should return empty matches, not an error
                 assert "matches" in result
                 assert result["matches"] == []
@@ -1034,20 +1042,24 @@ def test_fuzzy_search_documents_fzf_no_match():
                 mock_rga_proc = MagicMock()
                 mock_rga_proc.communicate.return_value = (
                     '{"type":"match","data":{"path":{"text":"test.pdf"},"lines":{"text":"Page 1: Some content"},"line_number":null}}\n',
-                    ""
+                    "",
                 )
                 mock_rga_proc.wait.return_value = None
-                
+
                 # Mock fzf process returning FZF_EXIT_NO_MATCH
                 mock_fzf_proc = MagicMock()
                 mock_fzf_proc.communicate.return_value = ("", "")
-                mock_fzf_proc.returncode = mcp_fuzzy_search.FZF_EXIT_NO_MATCH  # Exit code 1
-                
+                mock_fzf_proc.returncode = (
+                    mcp_fuzzy_search.FZF_EXIT_NO_MATCH
+                )  # Exit code 1
+
                 mock_popen.side_effect = [mock_rga_proc, mock_fzf_proc]
-                
+
                 # Call the function
-                result = mcp_fuzzy_search.fuzzy_search_documents("nonexistent_pattern", ".")
-                
+                result = mcp_fuzzy_search.fuzzy_search_documents(
+                    "nonexistent_pattern", "."
+                )
+
                 # Should return empty matches, not an error
                 assert "matches" in result
                 assert result["matches"] == []
@@ -1062,22 +1074,24 @@ def test_fuzzy_search_files_fzf_actual_error():
                 with patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"):
                     # Mock rg listing files
                     mock_rg_output.return_value = "file1.py\nfile2.py\n"
-                    
+
                     # Mock fzf process returning FZF_EXIT_ERROR
                     mock_fzf_proc = MagicMock()
                     mock_fzf_proc.communicate.return_value = ("", "fzf error occurred")
-                    mock_fzf_proc.returncode = mcp_fuzzy_search.FZF_EXIT_ERROR  # Exit code 2
-                    
+                    mock_fzf_proc.returncode = (
+                        mcp_fuzzy_search.FZF_EXIT_ERROR
+                    )  # Exit code 2
+
                     # Mock rg process
                     mock_rg_proc = MagicMock()
                     mock_rg_proc.stdout = MagicMock()
                     mock_rg_proc.wait.return_value = 0
-                    
+
                     mock_popen.side_effect = [mock_rg_proc, mock_fzf_proc]
-                    
+
                     # Call the function
                     result = mcp_fuzzy_search.fuzzy_search_files("test", ".")
-                    
+
                     # Should return an error
                     assert "error" in result
                     assert "matches" not in result
@@ -1095,17 +1109,19 @@ def test_fuzzy_search_content_fzf_actual_error():
                 mock_rg_proc.stderr.read.return_value = b""
                 mock_rg_proc.wait.return_value = 0
                 mock_rg_proc.returncode = 0
-                
+
                 # Mock fzf process returning FZF_EXIT_ERROR
                 mock_fzf_proc = MagicMock()
                 mock_fzf_proc.communicate.return_value = ("", "fzf error occurred")
-                mock_fzf_proc.returncode = mcp_fuzzy_search.FZF_EXIT_ERROR  # Exit code 2
-                
+                mock_fzf_proc.returncode = (
+                    mcp_fuzzy_search.FZF_EXIT_ERROR
+                )  # Exit code 2
+
                 mock_popen.side_effect = [mock_rg_proc, mock_fzf_proc]
-                
+
                 # Call the function
                 result = mcp_fuzzy_search.fuzzy_search_content("test", ".")
-                
+
                 # Should return an error
                 assert "error" in result
                 assert "matches" not in result
@@ -1119,22 +1135,26 @@ def test_fuzzy_search_files_multiline_fzf_no_match():
                 with patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"):
                     # Mock rg listing files
                     mock_rg_output.return_value = "test.py\n"
-                    
+
                     # Mock fzf process returning FZF_EXIT_NO_MATCH in multiline mode
                     mock_fzf_proc = MagicMock()
                     mock_fzf_proc.communicate.return_value = (b"", b"")
-                    mock_fzf_proc.returncode = mcp_fuzzy_search.FZF_EXIT_NO_MATCH  # Exit code 1
+                    mock_fzf_proc.returncode = (
+                        mcp_fuzzy_search.FZF_EXIT_NO_MATCH
+                    )  # Exit code 1
                     mock_popen.return_value = mock_fzf_proc
-                    
+
                     # Mock file reading
                     with patch("pathlib.Path.open") as mock_open:
                         mock_file = MagicMock()
                         mock_file.read.return_value = b"test content"
                         mock_open.return_value.__enter__.return_value = mock_file
-                        
+
                         # Call the function in multiline mode
-                        result = mcp_fuzzy_search.fuzzy_search_files("nonexistent", ".", multiline=True)
-                        
+                        result = mcp_fuzzy_search.fuzzy_search_files(
+                            "nonexistent", ".", multiline=True
+                        )
+
                         # Should return empty matches, not an error
                         assert "matches" in result
                         assert result["matches"] == []
@@ -1149,22 +1169,26 @@ def test_fuzzy_search_content_multiline_fzf_no_match():
                 with patch.object(mcp_fuzzy_search, "FZF_EXECUTABLE", "/mock/fzf"):
                     # Mock rg listing files
                     mock_rg_output.return_value = "test.py\n"
-                    
+
                     # Mock fzf process returning FZF_EXIT_NO_MATCH in multiline mode
                     mock_fzf_proc = MagicMock()
                     mock_fzf_proc.communicate.return_value = (b"", b"")
-                    mock_fzf_proc.returncode = mcp_fuzzy_search.FZF_EXIT_NO_MATCH  # Exit code 1
+                    mock_fzf_proc.returncode = (
+                        mcp_fuzzy_search.FZF_EXIT_NO_MATCH
+                    )  # Exit code 1
                     mock_popen.return_value = mock_fzf_proc
-                    
+
                     # Mock file reading
                     with patch("pathlib.Path.open") as mock_open:
                         mock_file = MagicMock()
                         mock_file.read.return_value = b"test content"
                         mock_open.return_value.__enter__.return_value = mock_file
-                        
+
                         # Call the function in multiline mode
-                        result = mcp_fuzzy_search.fuzzy_search_content("nonexistent", ".", multiline=True)
-                        
+                        result = mcp_fuzzy_search.fuzzy_search_content(
+                            "nonexistent", ".", multiline=True
+                        )
+
                         # Should return empty matches, not an error
                         assert "matches" in result
                         assert result["matches"] == []
