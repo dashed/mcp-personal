@@ -480,7 +480,7 @@ monkeypatch = pytest.MonkeyPatch()
 
 
 def test_fd_flag_handling(tmp_path: Path):
-    """Test that fzf exits with error code when no matches found."""
+    """Test that fzf exit code FZF_EXIT_NO_MATCH (1) returns empty matches, not error."""
     if platform.system() == "Windows":
         mock_fd = tmp_path / "fd.bat"
         mock_fd.write_text("""@echo off
@@ -489,9 +489,9 @@ echo file2.log
 """)
 
         mock_fzf = tmp_path / "fzf.bat"
-        mock_fzf.write_text("""@echo off
-rem fzf returns exit code 1 when no matches found
-exit /b 1
+        mock_fzf.write_text(f"""@echo off
+rem fzf returns exit code {mcp_fd_server.FZF_EXIT_NO_MATCH} when no matches found
+exit /b {mcp_fd_server.FZF_EXIT_NO_MATCH}
 """)
     else:
         mock_fd = tmp_path / "fd"
@@ -504,10 +504,10 @@ sys.exit(0)
         mock_fd.chmod(0o755)
 
         mock_fzf = tmp_path / "fzf"
-        mock_fzf.write_text("""#!/usr/bin/env python3
+        mock_fzf.write_text(f"""#!/usr/bin/env python3
 import sys
-# fzf returns exit code 1 when no matches found
-sys.exit(1)
+# fzf returns exit code {mcp_fd_server.FZF_EXIT_NO_MATCH} when no matches found
+sys.exit({mcp_fd_server.FZF_EXIT_NO_MATCH})
 """)
         mock_fzf.chmod(0o755)
 
@@ -521,13 +521,13 @@ sys.exit(1)
 
         result = mcp_fd_server.filter_files("nomatch")
 
-        # Should handle empty results gracefully (fzf exit code 1 = no matches, not error)
+        # Should handle empty results gracefully (FZF_EXIT_NO_MATCH = no matches, not error)
         assert "matches" in result
         assert result["matches"] == []
 
 
 def test_fzf_actual_error_handling(tmp_path: Path):
-    """Test that fzf exit code 2 (actual error) is properly reported as an error."""
+    """Test that fzf exit code FZF_EXIT_ERROR (2) is properly reported as an error."""
     if platform.system() == "Windows":
         mock_fd = tmp_path / "fd.bat"
         mock_fd.write_text("""@echo off
@@ -536,10 +536,10 @@ echo file2.log
 """)
 
         mock_fzf = tmp_path / "fzf.bat"
-        mock_fzf.write_text("""@echo off
-rem fzf returns exit code 2 for actual errors
+        mock_fzf.write_text(f"""@echo off
+rem fzf returns exit code {mcp_fd_server.FZF_EXIT_ERROR} for actual errors
 echo Error: fzf encountered an error >&2
-exit /b 2
+exit /b {mcp_fd_server.FZF_EXIT_ERROR}
 """)
     else:
         mock_fd = tmp_path / "fd"
@@ -552,11 +552,11 @@ sys.exit(0)
         mock_fd.chmod(0o755)
 
         mock_fzf = tmp_path / "fzf"
-        mock_fzf.write_text("""#!/usr/bin/env python3
+        mock_fzf.write_text(f"""#!/usr/bin/env python3
 import sys
-# fzf returns exit code 2 for actual errors
+# fzf returns exit code {mcp_fd_server.FZF_EXIT_ERROR} for actual errors
 print("Error: fzf encountered an error", file=sys.stderr)
-sys.exit(2)
+sys.exit({mcp_fd_server.FZF_EXIT_ERROR})
 """)
         mock_fzf.chmod(0o755)
 
@@ -570,7 +570,7 @@ sys.exit(2)
 
         result = mcp_fd_server.filter_files("searchterm")
 
-        # Should return an error for exit code 2, not empty matches
+        # Should return an error for FZF_EXIT_ERROR, not empty matches
         assert "error" in result
         assert "matches" not in result
         # The error should contain information about the subprocess error
@@ -580,7 +580,7 @@ sys.exit(2)
 
 
 def test_fzf_actual_error_handling_multiline(tmp_path: Path):
-    """Test that fzf exit code 2 in multiline mode is properly reported as an error."""
+    """Test that fzf exit code FZF_EXIT_ERROR (2) in multiline mode is properly reported as an error."""
     # Create test files with content
     test_file1 = tmp_path / "test1.txt"
     test_file1.write_text("content1")
@@ -595,10 +595,10 @@ echo {test_file2}
 """)
 
         mock_fzf = tmp_path / "fzf.bat"
-        mock_fzf.write_text("""@echo off
-rem fzf returns exit code 2 for actual errors in multiline mode
+        mock_fzf.write_text(f"""@echo off
+rem fzf returns exit code {mcp_fd_server.FZF_EXIT_ERROR} for actual errors in multiline mode
 echo Error: fzf multiline processing failed >&2
-exit /b 2
+exit /b {mcp_fd_server.FZF_EXIT_ERROR}
 """)
     else:
         mock_fd = tmp_path / "fd"
@@ -611,11 +611,11 @@ sys.exit(0)
         mock_fd.chmod(0o755)
 
         mock_fzf = tmp_path / "fzf"
-        mock_fzf.write_text("""#!/usr/bin/env python3
+        mock_fzf.write_text(f"""#!/usr/bin/env python3
 import sys
-# fzf returns exit code 2 for actual errors in multiline mode
+# fzf returns exit code {mcp_fd_server.FZF_EXIT_ERROR} for actual errors in multiline mode
 print("Error: fzf multiline processing failed", file=sys.stderr)
-sys.exit(2)
+sys.exit({mcp_fd_server.FZF_EXIT_ERROR})
 """)
         mock_fzf.chmod(0o755)
 
@@ -629,7 +629,7 @@ sys.exit(2)
 
         result = mcp_fd_server.filter_files("searchterm", multiline=True)
 
-        # Should return an error for exit code 2 in multiline mode too
+        # Should return an error for FZF_EXIT_ERROR in multiline mode too
         assert "error" in result
         assert "matches" not in result
         # The error should contain information about the subprocess error

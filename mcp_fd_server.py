@@ -98,6 +98,17 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# fzf exit codes (based on fzf source code constants)
+FZF_EXIT_OK = 0  # Success with matches
+FZF_EXIT_NO_MATCH = 1  # No matches found (NOT an error condition)
+FZF_EXIT_ERROR = 2  # Error occurred
+FZF_EXIT_BECOME = 126  # Special exit for 'become' action
+FZF_EXIT_INTERRUPT = 130  # User interrupted (e.g., Ctrl+C)
+
+# ---------------------------------------------------------------------------
 # Binary discovery helpers
 # ---------------------------------------------------------------------------
 
@@ -186,21 +197,21 @@ def _handle_fzf_error(
     """Handle fzf CalledProcessError, returning appropriate result dict.
 
     fzf exit codes (from fzf source code):
-    - 0: Success with matches (ExitOk)
-    - 1: No matches found (ExitNoMatch) - NOT an error condition
-    - 2: Error occurred (ExitError)
-    - 126: Special exit for 'become' action (ExitBecome)
-    - 130: User interrupted, e.g., Ctrl+C (ExitInterrupt)
+    - 0: Success with matches (FZF_EXIT_OK)
+    - 1: No matches found (FZF_EXIT_NO_MATCH) - NOT an error condition
+    - 2: Error occurred (FZF_EXIT_ERROR)
+    - 126: Special exit for 'become' action (FZF_EXIT_BECOME)
+    - 130: User interrupted, e.g., Ctrl+C (FZF_EXIT_INTERRUPT)
 
     This function specifically handles the case where fzf exits with code 1,
     which indicates no matches were found but is not an error condition.
     """
     # fzf returns exit code 1 when no matches found - this is not an error
-    if exc.returncode == 1:
+    if exc.returncode == FZF_EXIT_NO_MATCH:
         return {"matches": []}  # No matches found, return empty list
 
     # All other non-zero exit codes are treated as errors
-    # This includes exit code 2 (actual error) and 130 (user interrupt)
+    # This includes FZF_EXIT_ERROR (actual error) and FZF_EXIT_INTERRUPT (user interrupt)
     error_result: dict[str, Any] = {"error": str(exc)}
     if warnings:
         error_result["warnings"] = warnings
