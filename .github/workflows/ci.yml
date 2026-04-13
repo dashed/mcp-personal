@@ -32,10 +32,15 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y fd-find fzf ripgrep pandoc poppler-utils ffmpeg
-        # Install ripgrep-all (rga) from GitHub releases
-        wget https://github.com/phiresky/ripgrep-all/releases/latest/download/ripgrep_all-v0.10.9-x86_64-unknown-linux-musl.tar.gz
-        tar -xzf ripgrep_all-v0.10.9-x86_64-unknown-linux-musl.tar.gz
-        sudo cp ripgrep_all-v0.10.9-x86_64-unknown-linux-musl/rga /usr/local/bin/
+        # Install ripgrep-all (rga) from GitHub releases. Pin the full
+        # tag URL instead of `/latest/download/` — GitHub's latest-redirect
+        # returns 404 when the asset filename embeds an older version than
+        # whatever tag it currently resolves to.
+        RGA_VERSION=v0.10.9
+        RGA_ASSET=ripgrep_all-${RGA_VERSION}-x86_64-unknown-linux-musl
+        wget "https://github.com/phiresky/ripgrep-all/releases/download/${RGA_VERSION}/${RGA_ASSET}.tar.gz"
+        tar -xzf "${RGA_ASSET}.tar.gz"
+        sudo cp "${RGA_ASSET}/rga" /usr/local/bin/
         # Create symlink for fd (it's installed as fdfind on Ubuntu/Debian)
         sudo ln -s $(which fdfind) /usr/local/bin/fd || true
 
