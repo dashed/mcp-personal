@@ -53,7 +53,10 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
 import sys
+import textwrap
+import unicodedata
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -115,6 +118,50 @@ OptionalCoercedInt = Annotated[int | None, BeforeValidator(_coerce_int)]
 
 
 # ---------------------------------------------------------------------------
+# ANSI color support
+# ---------------------------------------------------------------------------
+
+
+_ANSI_RESET = "\x1b[0m"
+_ANSI_BLUE = "\x1b[34m"
+_ANSI_GREEN = "\x1b[32m"
+_ANSI_YELLOW = "\x1b[33m"
+
+
+def _display_width(s: str) -> int:
+    """Return the terminal-cell width of ``s``.
+
+    Treats East Asian Wide/Fullwidth characters (including emoji like 💭, 🔄,
+    🌿) as 2 cells and skips control chars. ``len()`` counts code points, so
+    it under-reports the width of emoji headers and produces ragged boxes.
+    """
+    return sum(
+        2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        for ch in s
+        if not unicodedata.category(ch).startswith("C")
+    )
+
+
+def _pad_cells(s: str, width: int) -> str:
+    """Right-pad ``s`` with spaces so it occupies ``width`` terminal cells."""
+    return s + " " * max(0, width - _display_width(s))
+
+
+def _detect_color() -> bool:
+    """Decide whether stderr should receive ANSI color codes.
+
+    Honors the no-color.org convention (``NO_COLOR`` presence disables) and
+    the de-facto ``FORCE_COLOR`` opt-in, falling back to TTY detection.
+    """
+    if "NO_COLOR" in os.environ:
+        return False
+    force = os.environ.get("FORCE_COLOR", "")
+    if force and force != "0":
+        return True
+    return sys.stderr.isatty()
+
+
+# ---------------------------------------------------------------------------
 # Core server class
 # ---------------------------------------------------------------------------
 
@@ -135,19 +182,35 @@ class SequentialThinkingServer:
     reference implementation).
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        use_color: bool | None = None,
+        max_content_width: int | None = None,
+    ) -> None:
         self.thought_history: list[dict[str, Any]] = []
         self.branches: dict[str, list[dict[str, Any]]] = {}
         self.disable_thought_logging: bool = (
             os.environ.get("DISABLE_THOUGHT_LOGGING", "").strip().lower() == "true"
         )
+        self._use_color: bool = _detect_color() if use_color is None else use_color
+        self._max_content_width: int | None = max_content_width
+
+    def _resolve_max_content_width(self) -> int:
+        if self._max_content_width is not None:
+            return self._max_content_width
+        terminal_width = shutil.get_terminal_size((80, 20)).columns
+        return max(20, min(terminal_width - 4, 100))
 
     def _format_thought(self, thought_data: dict[str, Any]) -> str:
         """Render a thought as a Unicode box for stderr logging.
 
-        The header prefix is one of ``💭 Thought``, ``🔄 Revision``, or
-        ``🌿 Branch`` depending on which optional fields are present, and the
-        box is sized to fit whichever of the header or thought body is longer.
+        Handles multi-line thoughts and word-wraps each segment to the
+        terminal width (capped to 100 cols, floored at 20). When
+        ``self._use_color`` is True, each rendered line is wrapped in an
+        ANSI color sequence keyed off the thought kind (blue/yellow/green
+        for regular/revision/branch). Padding is computed on the uncolored
+        strings so the box stays rectangular.
         """
         thought_number = thought_data["thoughtNumber"]
         total_thoughts = thought_data["totalThoughts"]
@@ -160,26 +223,54 @@ class SequentialThinkingServer:
         if is_revision:
             prefix = "🔄 Revision"
             context = f" (revising thought {revises_thought})"
+            color = _ANSI_YELLOW
         elif branch_from_thought:
             prefix = "🌿 Branch"
             context = f" (from thought {branch_from_thought}, ID: {branch_id})"
+            color = _ANSI_GREEN
         else:
             prefix = "💭 Thought"
             context = ""
+            color = _ANSI_BLUE
 
         header = f"{prefix} {thought_number}/{total_thoughts}{context}"
-        border_width = max(len(header), len(thought)) + 4
-        border = "─" * border_width
-        padded_thought = thought.ljust(border_width - 2)
-        padded_header = header.ljust(border_width - 2)
 
-        return (
-            f"\n┌{border}┐"
-            f"\n│ {padded_header} │"
-            f"\n├{border}┤"
-            f"\n│ {padded_thought} │"
-            f"\n└{border}┘"
+        max_content_width = self._resolve_max_content_width()
+
+        if thought == "":
+            wrapped_lines: list[str] = [""]
+        else:
+            wrapped_lines = []
+            for line in thought.splitlines():
+                segments = textwrap.wrap(
+                    line,
+                    width=max_content_width,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                )
+                if not segments:
+                    segments = [""]
+                wrapped_lines.extend(segments)
+
+        line_widths = [_display_width(line) for line in wrapped_lines]
+        content_width = min(
+            max(_display_width(header), *line_widths), max_content_width
         )
+
+        border = "─" * (content_width + 2)
+        box_lines = [
+            f"┌{border}┐",
+            f"│ {_pad_cells(header, content_width)} │",
+            f"├{border}┤",
+        ]
+        for line in wrapped_lines:
+            box_lines.append(f"│ {_pad_cells(line, content_width)} │")
+        box_lines.append(f"└{border}┘")
+
+        if self._use_color:
+            box_lines = [f"{color}{line}{_ANSI_RESET}" for line in box_lines]
+
+        return "\n" + "\n".join(box_lines)
 
     def process_thought(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Record a thought and return a summary of the current state.
