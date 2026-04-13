@@ -189,8 +189,8 @@ def test_binary_discovery():
     """Test binary discovery logic for fd and fzf."""
     with patch("shutil.which") as mock_which:
         # Test fd discovery (fd takes precedence over fdfind)
-        mock_which.side_effect = (
-            lambda x: "/usr/bin/fd"
+        mock_which.side_effect = lambda x: (
+            "/usr/bin/fd"
             if x == "fd"
             else ("/usr/bin/fdfind" if x == "fdfind" else None)
         )
