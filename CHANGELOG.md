@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- **Sequential Thinking MCP Server**: New `mcp_sequential_thinking.py` server — a single-file Python port of [`@modelcontextprotocol/server-sequential-thinking`](https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking)
+  - Exposes a single tool, `sequentialthinking`, for dynamic, reflective problem-solving through a chain of thoughts
+  - **Thought revision** via `isRevision` / `revisesThought` — revise earlier steps when understanding deepens
+  - **Branching** via `branchFromThought` / `branchId` — explore alternative reasoning paths from any prior thought
+  - **Dynamic totals** — adjust `totalThoughts` up or down between calls, or extend past the initial estimate with `needsMoreThoughts`
+  - **String-coercion fix**: accepts string values for numeric (`thoughtNumber`, `totalThoughts`, `revisesThought`, `branchFromThought`) and boolean (`nextThoughtNeeded`, `isRevision`, `needsMoreThoughts`) fields. Incorporates the fix from [modelcontextprotocol/servers#3856](https://github.com/modelcontextprotocol/servers/issues/3856), which is not yet shipped in the npm release (`2025.12.18`), so Claude Code can call the tool reliably even when it serializes those fields as strings
+  - **Optional thought logging**: pretty-printed formatted thoughts are written to stderr by default; set `DISABLE_THOUGHT_LOGGING=true` to silence them while keeping structured tool output intact
+  - **Structured output**: each call returns `thoughtNumber`, `totalThoughts`, `nextThoughtNeeded`, active `branches`, and `thoughtHistoryLength`
+  - Tests at `tests/test_sequential_thinking.py` covering the happy path, revisions, branching, dynamic total adjustments, string-coerced inputs, and the `DISABLE_THOUGHT_LOGGING` env var
 - **Limit Parameter Support**: Added `limit` parameter to `search_files` and `filter_files` functions
   - Allows restricting the maximum number of results returned
   - `search_files` uses fd's native `--max-results` flag for efficiency

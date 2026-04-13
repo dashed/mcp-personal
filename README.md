@@ -43,6 +43,17 @@ SQLite database operations with configurable read/write permissions:
 - **Safety features** - Query validation, write operation restrictions, clear error messages
 - **Standalone CLI** for testing and direct usage
 
+### 4. Sequential Thinking Server (`mcp_sequential_thinking.py`)
+Dynamic, reflective problem-solving through a structured chain of thoughts — a Python port of the official [`@modelcontextprotocol/server-sequential-thinking`](https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking) server:
+- **Dynamic problem-solving** — break complex problems into discrete, adjustable thinking steps
+- **Thought revision** — revise earlier thoughts when understanding deepens (`isRevision` / `revisesThought`)
+- **Branching** — explore alternative reasoning paths from any prior thought (`branchFromThought` / `branchId`)
+- **Adjustable totals** — scale `totalThoughts` up or down mid-process, or extend past the initial estimate with `needsMoreThoughts`
+- **Hypothesis generation & verification** — generate candidate solutions and verify them against the chain of thought
+- **String-coercion fix** — accepts string inputs for numeric (`thoughtNumber`, `totalThoughts`) and boolean (`nextThoughtNeeded`, `isRevision`, `needsMoreThoughts`) fields, so it works with Claude Code out of the box. Includes the fix from [modelcontextprotocol/servers#3856](https://github.com/modelcontextprotocol/servers/issues/3856), which is not yet shipped in the npm release (`2025.12.18`)
+- **Optional thought logging** — pretty-printed formatted thoughts go to stderr by default; set `DISABLE_THOUGHT_LOGGING=true` to silence them
+- **Single tool**: `sequentialthinking`
+
 ## Prerequisites
 
 ### General Requirements
@@ -128,9 +139,6 @@ cd mcp-personal
 The easiest way to add MCP servers to Claude Code is using the CLI:
 
 ```bash
-# Add published npm servers (recommended to use -s user for global access)
-claude mcp add sequential-thinking -s user -- npx -y @modelcontextprotocol/server-sequential-thinking
-
 # Add custom Python servers from this repository
 # IMPORTANT: Use -s user for personal tools you want available across all projects
 # Without -s flag, servers are only available in current directory and are temporary
@@ -140,16 +148,22 @@ cd /path/to/mcp-personal
 claude mcp add file-search -s user -- $(pwd)/mcp_fd_server.py
 claude mcp add fuzzy-search -s user -- $(pwd)/mcp_fuzzy_search.py
 claude mcp add sqlite -s user -- $(pwd)/mcp_sqlite_server.py
+claude mcp add sequential-thinking -s user -- $(pwd)/mcp_sequential_thinking.py
 
 # Or use relative paths (also from project directory)
 claude mcp add file-search -s user -- ./mcp_fd_server.py
 claude mcp add fuzzy-search -s user -- ./mcp_fuzzy_search.py
 claude mcp add sqlite -s user -- ./mcp_sqlite_server.py
+claude mcp add sequential-thinking -s user -- ./mcp_sequential_thinking.py
 
 # Using absolute paths (works from anywhere)
 claude mcp add file-search -s user -- /path/to/mcp-personal/mcp_fd_server.py
 claude mcp add fuzzy-search -s user -- /path/to/mcp-personal/mcp_fuzzy_search.py
 claude mcp add sqlite -s user -- /path/to/mcp-personal/mcp_sqlite_server.py
+claude mcp add sequential-thinking -s user -- /path/to/mcp-personal/mcp_sequential_thinking.py
+
+# Disable thought logging for the sequential thinking server
+claude mcp add sequential-thinking -s user -e DISABLE_THOUGHT_LOGGING=true -- /path/to/mcp-personal/mcp_sequential_thinking.py
 
 # Add SQLite server with write permissions enabled
 claude mcp add sqlite -s user -- /path/to/mcp-personal/mcp_sqlite_server.py --allow-writes
@@ -196,6 +210,12 @@ For Claude Desktop, manually add servers to `~/Library/Application Support/Claud
       "args": ["--allow-writes"],
       "env": {
         "MCP_SQLITE_ALLOW_WRITES": "true"
+      }
+    },
+    "sequential-thinking": {
+      "command": "/path/to/mcp-personal/mcp_sequential_thinking.py",
+      "env": {
+        "DISABLE_THOUGHT_LOGGING": "false"
       }
     }
   }
@@ -246,6 +266,12 @@ npx @modelcontextprotocol/inspector ./mcp_sqlite_server.py
 
 # Test the SQLite server with write permissions
 npx @modelcontextprotocol/inspector ./mcp_sqlite_server.py -- --allow-writes
+
+# Test the sequential thinking server
+npx @modelcontextprotocol/inspector ./mcp_sequential_thinking.py
+
+# Test the sequential thinking server with thought logging disabled
+npx @modelcontextprotocol/inspector -e "DISABLE_THOUGHT_LOGGING=true" ./mcp_sequential_thinking.py
 ```
 
 This will:
@@ -439,6 +465,28 @@ The SQLite server also works as a standalone CLI tool:
 
 # Use in-memory database for testing
 ./mcp_sqlite_server.py query "SELECT sqlite_version()" :memory:
+```
+
+### Sequential Thinking Server
+
+#### As an MCP Server
+
+Once configured, Claude can invoke `sequentialthinking` to work through problems in explicit, revisable steps. Natural-language prompts that trigger it:
+
+- "Think step by step about how to design this caching layer"
+- "Use sequential thinking to debug why this test is flaky"
+- "Break this refactor down into thoughts and revise as you go"
+- "Plan the migration with the sequential thinking tool, branching if you see alternatives"
+
+Each call records one thought and returns the current state (`thoughtNumber`, `totalThoughts`, `nextThoughtNeeded`, active `branches`, and `thoughtHistoryLength`). Claude keeps calling the tool — revising, branching, or extending the total as needed — until `nextThoughtNeeded` is false.
+
+#### Logging
+
+By default, formatted thoughts are pretty-printed to **stderr** as they arrive (useful when running the server interactively or through the MCP Inspector). Set `DISABLE_THOUGHT_LOGGING=true` in the environment to silence the logging while keeping the structured tool output intact.
+
+```bash
+# Run with thought logging disabled
+DISABLE_THOUGHT_LOGGING=true ./mcp_sequential_thinking.py
 ```
 
 ## Multiline Search Mode
@@ -1190,20 +1238,77 @@ Create a new table with specified columns (requires write permissions).
 }
 ```
 
+### Sequential Thinking Server Tools
+
+#### `sequentialthinking`
+Record a single step in a dynamic, revisable chain of thoughts. Call repeatedly — revising, branching, or extending the total — until `nextThoughtNeeded` is false.
+
+**Parameters:**
+- `thought` (required, string): The current thinking step. Can be an analytical step, a revision of a previous thought, a question, a hypothesis, or a verification.
+- `nextThoughtNeeded` (required, boolean): Whether another thought step is needed. Accepts `true`/`false` or the strings `"true"`/`"false"`.
+- `thoughtNumber` (required, integer ≥ 1): Current thought number in the sequence. Accepts numeric or numeric-string values.
+- `totalThoughts` (required, integer ≥ 1): Current estimate of total thoughts needed. May be adjusted up or down between calls. Accepts numeric or numeric-string values.
+- `isRevision` (optional, boolean): Whether this thought revises an earlier one.
+- `revisesThought` (optional, integer ≥ 1): When `isRevision` is true, the thought number being reconsidered.
+- `branchFromThought` (optional, integer ≥ 1): When branching, the thought number this branch diverges from.
+- `branchId` (optional, string): Identifier for the current branch.
+- `needsMoreThoughts` (optional, boolean): Set to true if you reach the end but realize more thoughts are needed.
+
+**Output (structured):**
+- `thoughtNumber`, `totalThoughts`, `nextThoughtNeeded`, `branches` (list of active branch ids), `thoughtHistoryLength`.
+
+**Example:**
+```python
+{
+  "thought": "First, I need to map out the failure modes before proposing a fix.",
+  "nextThoughtNeeded": true,
+  "thoughtNumber": 1,
+  "totalThoughts": 5
+}
+```
+
+**Revision example:**
+```python
+{
+  "thought": "Reconsidering thought 2 — the retry logic is actually the root cause, not the timeout.",
+  "nextThoughtNeeded": true,
+  "thoughtNumber": 4,
+  "totalThoughts": 6,
+  "isRevision": true,
+  "revisesThought": 2
+}
+```
+
+**Branching example:**
+```python
+{
+  "thought": "Alternative approach: skip the cache entirely and hit the DB directly.",
+  "nextThoughtNeeded": true,
+  "thoughtNumber": 5,
+  "totalThoughts": 7,
+  "branchFromThought": 3,
+  "branchId": "no-cache"
+}
+```
+
+**Note:** All numeric and boolean fields also accept string inputs (e.g. `"1"`, `"true"`). This is the fix from [modelcontextprotocol/servers#3856](https://github.com/modelcontextprotocol/servers/issues/3856) and is what makes the server usable from Claude Code, which sometimes serializes those fields as strings.
+
 ## Development
 
 ### Project Structure
 ```
 mcp-personal/
-├── mcp_fd_server.py      # File search MCP server
-├── mcp_fuzzy_search.py   # Fuzzy content search MCP server
-├── mcp_sqlite_server.py  # SQLite database MCP server
-├── tests/                # Test suite
-│   ├── test_simple.py    # Direct function tests
-│   ├── test_fd_server.py # File search MCP integration tests
-│   ├── test_fuzzy_search.py # Fuzzy search tests
-│   ├── test_sqlite_server.py # SQLite server tests
-│   └── test_cli.py       # CLI interface tests
+├── mcp_fd_server.py            # File search MCP server
+├── mcp_fuzzy_search.py         # Fuzzy content search MCP server
+├── mcp_sqlite_server.py        # SQLite database MCP server
+├── mcp_sequential_thinking.py  # Sequential thinking MCP server
+├── tests/                      # Test suite
+│   ├── test_simple.py          # Direct function tests
+│   ├── test_fd_server.py       # File search MCP integration tests
+│   ├── test_fuzzy_search.py    # Fuzzy search tests
+│   ├── test_sqlite_server.py   # SQLite server tests
+│   ├── test_sequential_thinking.py # Sequential thinking tests
+│   └── test_cli.py             # CLI interface tests
 ├── pyproject.toml        # Project configuration
 ├── Makefile              # Development commands
 ├── CLAUDE.md             # Claude-specific instructions
@@ -1275,6 +1380,9 @@ Additionally uses:
 - **ripgrep**: Extremely fast search tool that respects gitignore
 - **fzf**: Command-line fuzzy finder (used in filter mode)
 
+### Sequential Thinking Server
+Pure Python — no extra binaries required. Maintains an in-memory list of thoughts and a branch map for the lifetime of the process; state is not persisted between runs.
+
 ## Security Considerations
 
 ### General
@@ -1307,6 +1415,11 @@ Additionally uses:
 - Can execute arbitrary SQL queries when write mode is enabled
 - Be extremely cautious with write permissions on production databases
 - Consider using separate read-only database users when possible
+
+### Sequential Thinking Server
+- No filesystem, network, or database access
+- Stores thoughts in memory only; no persistence between process runs
+- Formatted thoughts are written to **stderr** by default — set `DISABLE_THOUGHT_LOGGING=true` if thoughts might contain sensitive content you don't want in the parent process's stderr stream
 
 ## Troubleshooting
 
@@ -1352,3 +1465,6 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ### SQLite Server
 - [SQLite](https://www.sqlite.org/) - Self-contained, serverless, zero-configuration SQL database engine
+
+### Sequential Thinking Server
+- [@modelcontextprotocol/server-sequential-thinking](https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking) - The original TypeScript server this one is ported from
