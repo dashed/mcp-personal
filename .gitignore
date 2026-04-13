@@ -173,7 +173,6 @@ cython_debug/
 
 # uv
 .uv/
-uv.lock
 
 # macOS
 .DS_Store
