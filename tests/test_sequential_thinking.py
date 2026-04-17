@@ -8,6 +8,7 @@ https://github.com/modelcontextprotocol/servers/issues/3856.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 import types
@@ -492,6 +493,90 @@ def test_coercion_case_insensitive_bool_string() -> None:
     assert parsed2.nextThoughtNeeded is False
 
 
+@pytest.mark.parametrize("value", ["yes", "no", "on", "off", "1", "0", "t", "f"])
+def test_coercion_rejects_non_boolean_strings(value: str) -> None:
+    """TS zod ``z.boolean()`` only accepts true/false — reject zod-lax forms."""
+    from pydantic import ValidationError
+
+    model = _build_args_model()
+    with pytest.raises(ValidationError):
+        model.model_validate(
+            {
+                "thought": "reject",
+                "thoughtNumber": "1",
+                "totalThoughts": "1",
+                "nextThoughtNeeded": value,
+            }
+        )
+
+
+@pytest.mark.parametrize("value", [0, 1])
+def test_coercion_rejects_non_boolean_ints(value: int) -> None:
+    """TS zod ``z.boolean()`` rejects numeric 0/1 — so must we."""
+    from pydantic import ValidationError
+
+    model = _build_args_model()
+    with pytest.raises(ValidationError):
+        model.model_validate(
+            {
+                "thought": "reject",
+                "thoughtNumber": "1",
+                "totalThoughts": "1",
+                "nextThoughtNeeded": value,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("1e2", 100), ("1.0", 1), ("0x10", 16)],
+)
+def test_coercion_accepts_scientific_and_float_strings(raw: str, expected: int) -> None:
+    """Match TS zod ``z.coerce.number().int()`` breadth on string inputs."""
+    model = _build_args_model()
+    parsed = model.model_validate(
+        {
+            "thought": "widen",
+            "thoughtNumber": raw,
+            "totalThoughts": "1",
+            "nextThoughtNeeded": "false",
+        }
+    )
+    assert parsed.thoughtNumber == expected
+    assert isinstance(parsed.thoughtNumber, int)
+
+
+def test_coercion_accepts_native_integer_float() -> None:
+    """A float whose value is an integer (``1.0``) must coerce to ``1``."""
+    model = _build_args_model()
+    parsed = model.model_validate(
+        {
+            "thought": "float-int",
+            "thoughtNumber": 1.0,
+            "totalThoughts": 1,
+            "nextThoughtNeeded": False,
+        }
+    )
+    assert parsed.thoughtNumber == 1
+    assert isinstance(parsed.thoughtNumber, int)
+
+
+def test_coercion_rejects_non_integer_float() -> None:
+    """Non-integer floats must fail validation."""
+    from pydantic import ValidationError
+
+    model = _build_args_model()
+    with pytest.raises(ValidationError):
+        model.model_validate(
+            {
+                "thought": "non-int-float",
+                "thoughtNumber": 1.5,
+                "totalThoughts": 1,
+                "nextThoughtNeeded": False,
+            }
+        )
+
+
 # ---------------------------------------------------------------------------
 # Wrapping / multi-line rendering
 # ---------------------------------------------------------------------------
@@ -868,3 +953,112 @@ def test_tool_has_title_and_annotations() -> None:
     assert annotations.destructiveHint is False
     assert annotations.idempotentHint is True
     assert annotations.openWorldHint is False
+
+
+# ---------------------------------------------------------------------------
+# Server name (initialize handshake)
+# ---------------------------------------------------------------------------
+#
+# The TypeScript reference server advertises `serverInfo.name =
+# "sequential-thinking-server"` in its initialize handshake
+# (sequentialthinking/index.ts). Lock the Python port to the same name so
+# clients identifying servers by name see parity.
+
+
+def test_server_name_matches_ts_reference() -> None:
+    importlib.reload(mcp_sequential_thinking)
+    assert mcp_sequential_thinking.mcp.name == "sequential-thinking-server"
+
+
+# ---------------------------------------------------------------------------
+# Field descriptions (TS-parity, issue #3856 hints)
+# ---------------------------------------------------------------------------
+#
+# The TS reference server phrases thoughtNumber/totalThoughts descriptions as
+# "numeric value, e.g., ..." as a deliberate hint to string-coercing clients
+# (see mcp-anthropic-servers/src/sequentialthinking/index.ts). Lock the
+# Python port to the same phrasing.
+
+
+def test_tool_field_descriptions_match_ts() -> None:
+    model = _build_args_model()
+    assert (
+        model.model_fields["thoughtNumber"].description
+        == "Current thought number (numeric value, e.g., 1, 2, 3)"
+    )
+    assert (
+        model.model_fields["totalThoughts"].description
+        == "Estimated total thoughts needed (numeric value, e.g., 5, 10)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Error body shape on uncaught exception (TS parity)
+# ---------------------------------------------------------------------------
+#
+# The TS reference server returns ``{"error": ..., "status": "failed"}`` when
+# ``processThought`` throws. The Python tool wraps its body in try/except so
+# MCP clients that ``json.loads`` the content text see the same body shape.
+
+
+def test_tool_returns_ts_error_shape_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_sequential_thinking._thinking_server,
+        "process_thought",
+        lambda _input: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    result = asyncio.run(
+        mcp_sequential_thinking.sequentialthinking(
+            thought="will fail",
+            nextThoughtNeeded=False,
+            thoughtNumber=1,
+            totalThoughts=1,
+        )
+    )
+
+    assert result == {"error": "boom", "status": "failed"}
+
+
+# ---------------------------------------------------------------------------
+# Branch tracking requires BOTH branchFromThought AND branchId
+# ---------------------------------------------------------------------------
+#
+# The TS reference server only registers a branch when both fields are
+# present (sequentialthinking/lib.ts). Lock the invariant in the Python port
+# (mcp_sequential_thinking.py:289–292) so half-specified inputs silently
+# no-op rather than creating orphan/phantom branches.
+
+
+def test_branch_not_tracked_without_branch_id(
+    server: SequentialThinkingServer,
+) -> None:
+    result = server.process_thought(
+        {
+            "thought": "pseudo-branch without id",
+            "thoughtNumber": 2,
+            "totalThoughts": 3,
+            "nextThoughtNeeded": True,
+            "branchFromThought": 1,
+        }
+    )
+    assert result["branches"] == []
+    assert server.branches == {}
+
+
+def test_branch_not_tracked_without_branch_from(
+    server: SequentialThinkingServer,
+) -> None:
+    result = server.process_thought(
+        {
+            "thought": "pseudo-branch without from",
+            "thoughtNumber": 2,
+            "totalThoughts": 3,
+            "nextThoughtNeeded": True,
+            "branchId": "orphan-branch",
+        }
+    )
+    assert result["branches"] == []
+    assert server.branches == {}

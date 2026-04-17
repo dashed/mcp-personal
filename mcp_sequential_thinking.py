@@ -31,9 +31,18 @@ String coercion (issue #3856)
 Some MCP clients (notably Claude Code) serialize numeric and boolean tool
 arguments as JSON strings. The original npm-released TypeScript server
 rejects those payloads. This Python port deliberately accepts BOTH the
-native Python type AND a string that coerces (``"1"`` → ``1``,
-``"true"`` → ``True``) for every numeric/boolean parameter, using pydantic
-``BeforeValidator`` annotations.
+native Python type AND a coercible string for every numeric/boolean
+parameter, using pydantic ``BeforeValidator`` annotations:
+
+* Booleans: only the native ``bool`` and the case-insensitive strings
+  ``"true"``/``"false"`` (with surrounding whitespace stripped) are
+  accepted. Numeric ``0``/``1``, ``"yes"``/``"no"``, ``"on"``/``"off"``,
+  and similar forms are rejected to match TS zod ``z.boolean()`` strictness.
+* Integers: native ``int``, integer-valued ``float``, and strings parseable
+  as decimal (``"1"``), base-prefixed (``"0x10"``), scientific notation
+  (``"1e2"``), or explicit float (``"1.0"``) — matching TS zod
+  ``z.coerce.number().int()`` breadth. Non-integer floats/strings fall
+  through to pydantic, which rejects them.
 
 Quick start
 -----------
@@ -76,9 +85,11 @@ def _coerce_bool(value: Any) -> Any:
     """Coerce JSON-string booleans to Python bools.
 
     Accepts the native ``bool`` unchanged and converts the strings ``"true"``
-    and ``"false"`` (case-insensitive) to their Python equivalents. Any other
-    value is passed through to pydantic for normal validation, which will
-    raise if it cannot be interpreted as a boolean.
+    and ``"false"`` (case-insensitive, surrounding whitespace stripped) to
+    their Python equivalents. Any other value — including numeric ``0``/``1``,
+    ``"yes"``/``"no"``, ``"on"``/``"off"`` — raises ``ValueError`` so pydantic
+    reports validation failure. This matches the TS reference server's
+    ``z.boolean()`` semantics, which only accept native booleans.
     """
     if isinstance(value, bool):
         return value
@@ -88,27 +99,49 @@ def _coerce_bool(value: Any) -> Any:
             return True
         if lowered == "false":
             return False
-    return value
+        raise ValueError(
+            f"Cannot coerce string {value!r} to bool; expected 'true' or 'false'"
+        )
+    raise ValueError(
+        f"Cannot coerce {type(value).__name__} to bool; "
+        "expected bool or 'true'/'false' string"
+    )
 
 
 def _coerce_int(value: Any) -> Any:
-    """Coerce JSON-string integers to Python ints.
+    """Coerce JSON-string and float integers to Python ints.
 
-    Accepts the native ``int`` unchanged. A non-empty string of digits (with
-    optional surrounding whitespace and an optional leading sign) is parsed
-    via ``int()``. Anything else is passed through to pydantic.
+    Accepts the native ``int`` unchanged. A non-empty string is parsed via
+    ``int(stripped, 0)`` (so decimal as well as ``0x10``/``0b11``/``0o17``
+    literals work); if that fails, the string is re-parsed via ``float`` and
+    accepted when the result is integer-valued (covers ``"1.0"``, ``"1e2"``).
+    Native ``float`` values are likewise accepted when integer-valued. Native
+    ``bool`` is explicitly passed through so pydantic can reject it — otherwise
+    ``True``/``False`` would silently coerce to ``1``/``0``.
     """
     if isinstance(value, bool):
         return value
     if isinstance(value, int):
         return value
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        return value
     if isinstance(value, str):
         stripped = value.strip()
-        if stripped:
-            try:
-                return int(stripped)
-            except ValueError:
-                return value
+        if not stripped:
+            return value
+        try:
+            return int(stripped, 0)
+        except ValueError:
+            pass
+        try:
+            parsed = float(stripped)
+        except ValueError:
+            return value
+        if parsed.is_integer():
+            return int(parsed)
+        return value
     return value
 
 
@@ -381,7 +414,7 @@ You should:
 11. Only set nextThoughtNeeded to false when truly done and a satisfactory answer is reached"""
 
 
-mcp = FastMCP("Sequential Thinking")
+mcp = FastMCP("sequential-thinking-server")
 _thinking_server = SequentialThinkingServer()
 
 
@@ -411,11 +444,17 @@ async def sequentialthinking(
     ],
     thoughtNumber: Annotated[  # noqa: N803
         CoercedInt,
-        Field(ge=1, description="Current thought number (>= 1)"),
+        Field(
+            ge=1,
+            description="Current thought number (numeric value, e.g., 1, 2, 3)",
+        ),
     ],
     totalThoughts: Annotated[  # noqa: N803
         CoercedInt,
-        Field(ge=1, description="Estimated total thoughts needed (>= 1)"),
+        Field(
+            ge=1,
+            description="Estimated total thoughts needed (numeric value, e.g., 5, 10)",
+        ),
     ],
     isRevision: Annotated[  # noqa: N803
         OptionalCoercedBool,
@@ -456,7 +495,18 @@ async def sequentialthinking(
     if needsMoreThoughts is not None:
         input_data["needsMoreThoughts"] = needsMoreThoughts
 
-    return _thinking_server.process_thought(input_data)
+    # The TS reference server returns ``{"error": ..., "status": "failed"}``
+    # alongside an ``isError=true`` content flag on uncaught exceptions. On
+    # the pinned mcp==1.9.4 SDK we cannot set ``isError=true`` from a
+    # FastMCP-decorated tool without raising, and raising would re-wrap the
+    # body as ``"Error executing tool sequentialthinking: <msg>"`` — which
+    # breaks clients that ``json.loads`` the content text. Catching here
+    # preserves the TS body shape; the ``isError`` bit is a known divergence
+    # that closes when we upgrade past 1.9.4.
+    try:
+        return _thinking_server.process_thought(input_data)
+    except Exception as exc:
+        return {"error": str(exc), "status": "failed"}
 
 
 # ---------------------------------------------------------------------------
