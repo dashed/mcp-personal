@@ -60,6 +60,7 @@ import unicodedata
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from pydantic import BeforeValidator, Field
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
@@ -384,7 +385,24 @@ mcp = FastMCP("Sequential Thinking")
 _thinking_server = SequentialThinkingServer()
 
 
-@mcp.tool(description=_SEQUENTIAL_THINKING_DESCRIPTION)
+# Mirrors the ToolAnnotations set on the TypeScript reference server
+# (sequentialthinking/index.ts). The title lives inside annotations rather
+# than as a top-level Tool.title because mcp==1.9.4 exposes the title only
+# through ToolAnnotations.title — both FastMCP.tool() and types.Tool lack a
+# top-level title field on this SDK.
+_SEQUENTIAL_THINKING_ANNOTATIONS = ToolAnnotations(
+    title="Sequential Thinking",
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+
+
+@mcp.tool(
+    description=_SEQUENTIAL_THINKING_DESCRIPTION,
+    annotations=_SEQUENTIAL_THINKING_ANNOTATIONS,
+)
 async def sequentialthinking(
     thought: Annotated[str, Field(description="Your current thinking step")],
     nextThoughtNeeded: Annotated[  # noqa: N803

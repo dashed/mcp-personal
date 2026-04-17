@@ -845,3 +845,26 @@ def test_detect_color_tty_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(sys, "stderr", types.SimpleNamespace(isatty=lambda: False))
     assert _detect_color() is False
+
+
+# ---------------------------------------------------------------------------
+# Tool registration metadata (title + annotations)
+# ---------------------------------------------------------------------------
+#
+# Mirrors the `title` and `annotations` fields set by the TypeScript reference
+# server in sequentialthinking/index.ts. Locks in fidelity with that server so
+# clients see the same read-only/non-destructive/idempotent/closed-world hints.
+
+
+def test_tool_has_title_and_annotations() -> None:
+    importlib.reload(mcp_sequential_thinking)
+    tool = mcp_sequential_thinking.mcp._tool_manager.get_tool("sequentialthinking")
+    assert tool is not None
+
+    annotations = tool.annotations
+    assert annotations is not None
+    assert annotations.title == "Sequential Thinking"
+    assert annotations.readOnlyHint is True
+    assert annotations.destructiveHint is False
+    assert annotations.idempotentHint is True
+    assert annotations.openWorldHint is False
